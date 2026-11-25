@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Caderno</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📓</text></svg>">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+
+  <!-- Carregando -->
+  <section id="tela-carregando" class="tela tela-centro">
+    <p class="suave">Abrindo o caderno…</p>
+  </section>
+
+  <!-- Primeira configuração -->
+  <section id="tela-config" class="tela tela-centro" hidden>
+    <form class="cartao estreito" id="form-config" autocomplete="off">
+      <h1>📓 Caderno <span class="subtitulo">primeiro acesso</span></h1>
+      <p class="suave">Cole um token de acesso pessoal do GitHub (fine-grained, restrito ao repositório <code id="nome-repo"></code>, com permissão <code>Contents: Read and write</code>; crie em <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a>) e escolha uma senha. O token e os seus textos ficam <strong>criptografados</strong> com essa senha.</p>
+      <label>Token de acesso pessoal do GitHub<input name="token" type="password" placeholder="github_pat_…" required></label>
+      <label>Escolha uma senha<input name="senha" type="password" minlength="10" required autocomplete="new-password">
+        <small>Pelo menos 10 caracteres. Prefira uma frase longa.</small>
+      </label>
+      <p class="erro" id="erro-config" hidden></p>
+      <button class="botao primario" type="submit">Configurar acesso</button>
+    </form>
+  </section>
+
+  <!-- Código de recuperação (na criação e ao gerar um novo) -->
+  <section id="tela-codigo" class="tela tela-centro" hidden>
+    <div class="cartao">
+      <h1>🔑 Código de recuperação</h1>
+      <p>Se você esquecer a senha, este código é <strong>a única forma</strong> de abrir o caderno. Anote no papel ou num gerenciador de senhas. Ele não será mostrado de novo.</p>
+      <p class="codigo" id="codigo-valor"></p>
+      <div class="acoes">
+        <button class="botao" type="button" id="codigo-copiar">Copiar</button>
+        <button class="botao" type="button" id="codigo-baixar">Baixar .txt</button>
+      </div>
+      <label class="opcao"><input type="checkbox" id="codigo-ok"> <span>Guardei o código num lugar seguro.</span></label>
+      <p class="erro" id="erro-codigo" hidden></p>
+      <button class="botao primario" type="button" id="codigo-continuar" disabled>Continuar</button>
+    </div>
+  </section>
+
+  <!-- Login -->
+  <section id="tela-login" class="tela tela-centro" hidden>
+    <form class="cartao estreito" id="form-login">
+      <h1>📓 Caderno</h1>
+      <p class="suave">Digite sua senha para continuar.</p>
+      <label>Senha<input name="senha" type="password" required autofocus autocomplete="current-password"></label>
+      <p class="erro" id="erro-login" hidden></p>
+      <button class="botao primario" type="submit">Abrir</button>
+      <button class="link" type="button" id="ir-recuperar">Esqueci a senha</button>
+    </form>
+  </section>
+
+  <!-- Recuperação -->
+  <section id="tela-recuperar" class="tela tela-centro" hidden>
+    <form class="cartao estreito" id="form-recuperar" autocomplete="off">
+      <h1>Recuperar acesso</h1>
+      <label>Código de recuperação<input name="codigo" required placeholder="XXXX-XXXX-…" spellcheck="false"></label>
+      <label>Nova senha<input name="senha" type="password" minlength="10" required autocomplete="new-password"></label>
+      <label>Repita a nova senha<input name="senha2" type="password" minlength="10" required autocomplete="new-password"></label>
+      <p class="erro" id="erro-recuperar" hidden></p>
+      <button class="botao primario" type="submit">Definir nova senha</button>
+      <button class="link" type="button" id="voltar-login">Voltar</button>
+    </form>
+  </section>
+
+  <!-- Aplicativo -->
+  <div id="app" class="tela" data-vista="lista" hidden>
+    <header class="topo">
+      <button class="icone so-celular" id="abrir-pastas" title="Pastas">☰</button>
+      <span class="marca">📓 Caderno</span>
+      <span class="status" id="status"></span>
+      <button class="botao pequeno" id="salvar" title="Salvar agora (Ctrl+S)">Salvar</button>
+      <button class="icone" id="abrir-config" title="Configurações">⚙</button>
+    </header>
+
+    <aside class="pastas" id="painel-pastas">
+      <input type="search" id="busca" placeholder="Buscar em tudo…">
+      <nav id="lista-pastas"></nav>
+      <button class="botao fantasma" id="nova-pasta">+ Nova pasta</button>
+    </aside>
+
+    <section class="lista" id="painel-lista">
+      <div class="lista-topo">
+        <h2 id="titulo-pasta"></h2>
+        <div class="menu-pasta" id="menu-pasta">
+          <button class="icone" id="renomear-pasta" title="Renomear pasta">✎</button>
+          <button class="icone" id="excluir-pasta" title="Excluir pasta">🗑</button>
+        </div>
+      </div>
+      <div class="acoes novo">
+        <button class="botao" id="novo-texto">+ Texto</button>
+        <button class="botao" id="novo-diario">+ Diário</button>
+      </div>
+      <ul id="lista-textos"></ul>
+    </section>
+
+    <main class="editor" id="painel-editor"></main>
+  </div>
+
+  <!-- Configurações -->
+  <dialog id="dialogo-config">
+    <form method="dialog" class="dialogo-topo">
+      <h2>Configurações</h2>
+      <button class="icone" value="fechar" title="Fechar">✕</button>
+    </form>
+
+    <section>
+      <h3>Trocar senha</h3>
+      <form id="form-trocar-senha" autocomplete="off">
+        <label>Senha atual<input name="atual" type="password" required autocomplete="current-password"></label>
+        <label>Nova senha<input name="senha" type="password" minlength="10" required autocomplete="new-password"></label>
+        <label>Repita a nova senha<input name="senha2" type="password" minlength="10" required autocomplete="new-password"></label>
+        <button class="botao" type="submit">Trocar senha</button>
+      </form>
+    </section>
+
+    <section>
+      <h3>Código de recuperação</h3>
+      <p class="suave">Gerar um novo invalida o anterior.</p>
+      <button class="botao" type="button" id="novo-codigo">Gerar novo código</button>
+    </section>
+
+    <section id="secao-token">
+      <h3>Token do GitHub</h3>
+      <p class="suave" id="info-repo"></p>
+      <form id="form-token" autocomplete="off">
+        <label>Novo token<input name="token" type="password" required placeholder="github_pat_…"></label>
+        <button class="botao" type="submit">Atualizar token</button>
+      </form>
+    </section>
+
+    <section>
+      <h3>Backup</h3>
+      <p class="suave">O backup exportado <strong>não é criptografado</strong>: guarde com cuidado.</p>
+      <div class="acoes">
+        <button class="botao" type="button" id="exportar">Exportar backup</button>
+        <label class="botao">Importar backup<input type="file" id="importar" accept="application/json,.json" hidden></label>
+      </div>
+    </section>
+
+    <section>
+      <button class="botao perigo" type="button" id="sair">Sair (trancar)</button>
+    </section>
+    <p class="msg" id="msg-config" hidden></p>
+  </dialog>
+
+</body>
+</html>
