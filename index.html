@@ -6,6 +6,9 @@
   <meta name="robots" content="noindex, nofollow">
   <title>Caderno</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📓</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap">
   <link rel="stylesheet" href="css/style.css">
   <script src="vendor/marked.min.js"></script>
   <script src="vendor/purify.min.js"></script>
@@ -74,46 +77,47 @@
   </section>
 
   <!-- Aplicativo -->
-  <div id="app" class="tela" data-vista="inicio" hidden>
+  <div id="app" class="tela" data-pagina="inicio" hidden>
     <header class="topo">
-      <button class="icone so-celular" id="abrir-pastas" title="Pastas">☰</button>
+      <button class="icone so-celular" id="abrir-gaveta" title="Pastas">☰</button>
       <button class="marca" id="ir-inicio" title="Voltar às pastas">📓 Caderno</button>
       <span class="status" id="status"></span>
       <button class="botao pequeno" id="salvar" title="Salvar agora (Ctrl+S)">Salvar</button>
       <button class="icone" id="abrir-config" title="Configurações">⚙</button>
     </header>
 
-    <section class="inicio" id="painel-inicio">
-      <div class="inicio-topo">
-        <h1>Minhas pastas</h1>
-        <input type="search" id="busca-inicio" placeholder="Buscar em tudo…">
-      </div>
-      <div class="grade-pastas" id="grade-pastas"></div>
-    </section>
-
-    <aside class="pastas" id="painel-pastas">
-      <button class="botao fantasma voltar-inicio" id="voltar-inicio">← Todas as pastas</button>
-      <input type="search" id="busca" placeholder="Buscar em tudo…">
-      <nav id="lista-pastas"></nav>
-      <button class="botao fantasma" id="nova-pasta">+ Nova pasta</button>
-    </aside>
-
-    <section class="lista" id="painel-lista">
-      <div class="lista-topo">
-        <h2 id="titulo-pasta"></h2>
-        <div class="menu-pasta" id="menu-pasta">
-          <button class="icone" id="renomear-pasta" title="Renomear pasta">✎</button>
-          <button class="icone" id="excluir-pasta" title="Excluir pasta">🗑</button>
+    <div class="corpo-app">
+      <!-- Painel 1: pastas (pode ser recolhido) -->
+      <aside class="painel painel-pastas" id="painel-pastas">
+        <div class="painel-cabeca">
+          <span class="painel-titulo">Pastas</span>
+          <button class="recolher" data-painel="pastas" title="Recolher">«</button>
         </div>
-      </div>
-      <div class="acoes novo">
-        <button class="botao" id="novo-texto">+ Texto</button>
-        <button class="botao" id="novo-diario">+ Diário</button>
-      </div>
-      <ul id="lista-textos"></ul>
-    </section>
+        <div class="painel-conteudo">
+          <button class="pasta" id="voltar-inicio">⌂ Início</button>
+          <input type="search" id="busca" placeholder="Buscar em tudo…">
+          <nav id="lista-pastas"></nav>
+          <button class="botao fantasma" id="nova-pasta">+ Nova pasta</button>
+          <button class="pasta lixeira" id="abrir-lixeira"></button>
+        </div>
+        <button class="trilho" data-painel="pastas" title="Mostrar as pastas"><span>»</span><span class="trilho-rotulo">Pastas</span></button>
+      </aside>
 
-    <main class="editor" id="painel-editor"></main>
+      <!-- Painel 2: textos da pasta (começa recolhido) -->
+      <aside class="painel painel-lista recolhido" id="painel-lista">
+        <div class="painel-cabeca">
+          <span class="painel-titulo" id="titulo-lista"></span>
+          <button class="recolher" data-painel="lista" title="Recolher">«</button>
+        </div>
+        <div class="painel-conteudo">
+          <ul id="lista-textos"></ul>
+        </div>
+        <button class="trilho" data-painel="lista" title="Mostrar os textos da pasta"><span>»</span><span class="trilho-rotulo">Textos</span></button>
+      </aside>
+
+      <main class="principal" id="principal"></main>
+    </div>
+    <div class="fundo-gaveta" id="fundo-gaveta"></div>
   </div>
 
   <!-- Configurações -->

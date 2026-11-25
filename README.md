@@ -15,14 +15,25 @@ recuperação), os arquivos são ilegíveis.
 
 ## Como funciona
 
-- **Pastas** na barra lateral; dentro delas, dois tipos de texto:
-  - **Texto**: um documento em Markdown (ex.: um protocolo).
-  - **Diário**: uma descrição opcional + **entradas datadas**. O botão
-    “Entrada de hoje” abre (ou cria) a entrada do dia. É feito para a revisão
-    de literatura em que você avança um pouco por dia.
-- **Markdown** com pré-visualização (Escrever / Dividir / Ler). Checklists
-  `- [ ] passo` podem ser marcados clicando na pré-visualização, o que é útil
-  para seguir um protocolo na bancada.
+- **Pastas** em cartões grandes na tela inicial; dentro delas, dois tipos de texto:
+  - **Texto**: um documento único (ex.: um protocolo).
+  - **Diário**: uma descrição opcional + **entradas com data e hora**, numeradas,
+    numa linha do tempo (a mais recente no topo). Feito para a revisão de
+    literatura em que você avança um pouco por dia.
+- **Editor visual** (Escrever / Ler) com barra de formatação: negrito, itálico,
+  sublinhado, subtítulo, texto pequeno, sub/sobrescrito, listas, lista de
+  **passos** com caixinha (marcável também no modo Ler, útil na bancada),
+  tabelas, alinhamento e limpar formatação. Textos em Times New Roman; a
+  interface em Lexend. Ao colar de Word/PDF/sites, a formatação estranha é limpa.
+- **Painéis laterais recolhíveis**: pastas e lista de textos (esta começa recolhida).
+- **Lixeira**: nada é apagado. Pastas, textos e entradas vão para a Lixeira
+  (depois de “Nova pasta”) e podem ser restaurados a qualquer momento.
+- **Exportar** cada texto (o diário inteiro, com as entradas) em PDF, Word
+  (.docx) e .txt.
+- **Nada se perde**: cada alteração é copiada em segundos para o navegador
+  (cifrada com a sua chave). Se a aba fechar ou a internet cair, ao entrar de
+  novo o site recupera essas alterações, envia ao GitHub e reabre o texto onde
+  você estava. Sem internet, ele tenta reenviar sozinho.
 - **Busca** em todos os textos e entradas (ignora acentos).
 - **Salvamento**: automático 15 s depois da última alteração, ou na hora com
   o botão Salvar ou `Ctrl+S`. No modo GitHub, cada salvamento é um commit.
@@ -77,13 +88,17 @@ Para usar outro repositório, mude `js/config.js`.
 
 ```
 index.html            telas (criação, código, login, recuperação, app)
-css/style.css         visual (claro/escuro automático, celular)
+css/style.css         visual (tema claro, Lexend + Times New Roman, celular)
 js/config.js          repositório (dono, nome, branch, caminhos)
-js/app.js             interface: telas de acesso, pastas, lista, editor, diário, configurações
+js/app.js             interface: telas de acesso, pastas, lixeira, diário, configurações
+js/editor.js          editor visual e barra de formatação
+js/exportar.js        exportar em PDF, DOCX e TXT
+js/rascunho.js        cópia local cifrada e posição onde você parou
+js/util.js            funções pequenas (datas, textos, download)
 js/cripto.js          criptografia (senha, código de recuperação, conteúdo)
 js/armazenamento.js   leitura/gravação pela API do GitHub
 js/mesclar.js         junta versões vindas de aparelhos diferentes
-vendor/               marked (Markdown) e DOMPurify (sanitização)
+vendor/               DOMPurify (sanitização), docx (gerar .docx), marked (converte textos antigos em Markdown)
 serve.py              servidor local
 data/auth.json        token do GitHub, cifrado (criado no primeiro acesso)
 data/caderno.json     pastas e textos, cifrados (criado no primeiro acesso)
@@ -96,8 +111,10 @@ data/caderno.json     pastas e textos, cifrados (criado no primeiro acesso)
   "pastas": [{ "id": "pasta-…", "nome": "Protocolos do laboratório", "criadoEm": "…", "atualizadoEm": "…" }],
   "textos": [{
     "id": "texto-…", "pastaId": "pasta-…", "tipo": "texto | diario",
-    "titulo": "Extração de DNA", "corpo": "## Passos\n- [ ] …",
-    "entradas": [{ "id": "entrada-…", "data": "2026-11-25", "corpo": "…", "criadoEm": "…", "atualizadoEm": "…" }],
+    "formato": "html", "titulo": "Extração de DNA", "corpo": "<h3>Passos</h3><ul class=\"tarefas\">…",
+    "entradas": [{ "id": "entrada-…", "data": "2026-11-25", "hora": "14:32", "corpo": "<p>…</p>",
+                   "naLixeira": null, "criadoEm": "…", "atualizadoEm": "…" }],
+    "naLixeira": "data em que foi para a lixeira (ou ausente)",
     "criadoEm": "…", "atualizadoEm": "…"
   }],
   "removidos": { "texto-…": "data da exclusão" }

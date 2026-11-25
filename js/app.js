@@ -5,66 +5,59 @@ import {
 import { lerPublico, GitHub, ErroConflito, ErroAcesso } from "./armazenamento.js";
 import { mesclarDados } from "./mesclar.js";
 import { CONFIG } from "./config.js";
+import {
+  $, agora, novoId, esc, dataISO, horaISO, dataLonga, dataCurta, quando,
+  semAcento, textoDeHtml, plural, baixarArquivo,
+} from "./util.js";
+import { montarEditor, montarBarra, markdownParaHtml } from "./editor.js";
+import { exportarPdf, exportarTxt, exportarDocx } from "./exportar.js";
+import { guardarRascunho, lerRascunho, apagarRascunho, guardarPosicao, lerPosicao } from "./rascunho.js";
 
 // ---------------------------------------------------------------------------
 // Estado
 // ---------------------------------------------------------------------------
 //
 // data/auth.json    → { fechaduras: [senha, recuperacao], token: {iv, dados} }
-//                     A chave mestra fica trancada pela senha e pelo código de
-//                     recuperação; o token do GitHub é cifrado com ela.
-// data/caderno.json → { formato, versao, iv, dados }: pastas e textos cifrados
-//                     com a mesma chave mestra.
+// data/caderno.json → { formato, versao, iv, dados }: pastas e textos cifrados.
+//
+// Nada é apagado: pastas, textos e entradas de diário enviados para a
+// lixeira ganham o campo "naLixeira" (data) e podem ser restaurados.
+
+const LIXEIRA = "__lixeira";
+const AUTOSALVAR_MS = 15000;        // envia ao GitHub 15 s depois da última alteração
+const RASCUNHO_MS = 600;            // cópia local cifrada quase imediata
+const NOVA_TENTATIVA_MS = 30000;    // sem internet: tenta de novo a cada 30 s
+const RETOMAR_MS = 2 * 60 * 60 * 1000; // reabre onde parou se saiu há menos de 2 h
+
+function lerLS(chave, padrao = null) {
+  try { return localStorage.getItem(chave) ?? padrao; } catch { return padrao; }
+}
+function gravarLS(chave, valor) {
+  try { localStorage.setItem(chave, valor); } catch {}
+}
 
 const estado = {
-  auth: null,           // conteúdo de data/auth.json
-  shaAuth: null,        // versão de data/auth.json no GitHub
-  shaCaderno: null,     // versão de data/caderno.json no GitHub (para detectar conflito)
-  chave: null,          // chave mestra decifrada (só em memória)
-  github: null,         // cliente da API com o token decifrado
-  dados: null,          // conteúdo decifrado: { pastas, textos, removidos }
+  auth: null,
+  shaAuth: null,
+  shaCaderno: null,
+  chave: null,
+  github: null,
+  dados: null,          // { pastas, textos, removidos }
   pendente: false,
   salvando: false,
   salvarDeNovo: false,
   erro: "",
-  pastaAtual: null,      // null = tela inicial com as pastas
+  pagina: "inicio",     // inicio | pasta | lixeira | busca | texto
+  pastaAtual: null,
   textoAtual: null,
   busca: "",
-  entradaEditando: null,
+  modo: lerLS("caderno.modo") === "ler" ? "ler" : "escrever",
+  recolhido: { pastas: lerLS("caderno.recolher.pastas") === "1", lista: true },
 };
 
-const AUTOSALVAR_MS = 15000;
 let timerAutosalvar = null;
-
-const $ = (sel) => document.querySelector(sel);
-const agora = () => new Date().toISOString();
-const novoId = (prefixo) => `${prefixo}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-function hojeISO() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function dataLonga(iso) {
-  const [a, m, d] = iso.split("-").map(Number);
-  return new Date(a, m - 1, d).toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-}
-
-function quando(iso) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const hoje = new Date();
-  if (d.toDateString() === hoje.toDateString()) return `hoje, ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
-  return d.toLocaleDateString("pt-BR", { day: "numeric", month: "short", year: d.getFullYear() === hoje.getFullYear() ? undefined : "numeric" });
-}
-
-function semAcento(s) {
-  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-}
+let timerRascunho = null;
+let timerNovaTentativa = null;
 
 function mostrarTela(id) {
   document.querySelectorAll(".tela").forEach((t) => { t.hidden = t.id !== id; });
@@ -83,83 +76,26 @@ async function ocupado(botao, fn) {
   try { return await fn(); } finally { botao.disabled = false; botao.textContent = texto; }
 }
 
-// ---------------------------------------------------------------------------
-// Markdown
-// ---------------------------------------------------------------------------
-
-if (window.DOMPurify) {
-  DOMPurify.addHook("afterSanitizeAttributes", (no) => {
-    if (no.tagName === "A") { no.setAttribute("target", "_blank"); no.setAttribute("rel", "noopener noreferrer"); }
-  });
-}
-
-function renderizarMarkdown(texto) {
-  if (!texto.trim()) return "";
-  if (!window.marked || !window.DOMPurify) return `<p>${esc(texto).replace(/\n/g, "<br>")}</p>`;
-  return DOMPurify.sanitize(marked.parse(texto, { gfm: true, breaks: true }));
-}
-
-const RE_TAREFA = /^(\s*(?:[-*+]|\d+[.)])\s+)\[( |x|X)\]/gm;
-
-function alternarTarefa(texto, indice) {
-  let n = -1;
-  return texto.replace(RE_TAREFA, (tudo, prefixo, marca) => {
-    n += 1;
-    if (n !== indice) return tudo;
-    return `${prefixo}[${marca === " " ? "x" : " "}]`;
-  });
-}
-
-function autoAltura(ta) {
-  ta.style.height = "auto";
-  ta.style.height = `${ta.scrollHeight + 2}px`;
-}
-
-// Monta um bloco de edição Markdown (textarea + pré-visualização).
-// modo: "escrever" | "dividir" | "visualizar"
-function montarMarkdown(el, { valor, modo, placeholder, aoMudar }) {
-  el.classList.add("md");
-  el.dataset.modo = modo;
-  el.innerHTML = `<textarea spellcheck="true"></textarea><div class="preview markdown"></div>`;
-  const ta = el.querySelector("textarea");
-  const pv = el.querySelector(".preview");
-  ta.value = valor || "";
-  ta.placeholder = placeholder || "";
-
-  const atualizar = () => {
-    pv.innerHTML = renderizarMarkdown(ta.value) || `<p class="vazio">Nada escrito ainda.</p>`;
-    pv.querySelectorAll('input[type="checkbox"]').forEach((c) => { c.disabled = false; });
-  };
-  let t = null;
-  ta.addEventListener("input", () => {
-    aoMudar(ta.value);
-    autoAltura(ta);
-    clearTimeout(t);
-    t = setTimeout(atualizar, 150);
-  });
-  ta.addEventListener("keydown", (e) => {
-    if (e.key === "Tab" && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      const { selectionStart: i, selectionEnd: f } = ta;
-      ta.setRangeText("  ", i, f, "end");
-      ta.dispatchEvent(new Event("input"));
-    }
-  });
-  pv.addEventListener("click", (e) => {
-    const alvo = e.target;
-    if (!(alvo instanceof HTMLInputElement) || alvo.type !== "checkbox") return;
-    const indice = [...pv.querySelectorAll('input[type="checkbox"]')].indexOf(alvo);
-    ta.value = alternarTarefa(ta.value, indice);
-    aoMudar(ta.value);
-    atualizar();
-  });
-  atualizar();
-  requestAnimationFrame(() => autoAltura(ta));
-  return { ta, pv };
+// Aviso no canto da tela, com "Desfazer" opcional.
+let timerAviso = null;
+function avisar(msg, desfazer = null) {
+  let el = $("#aviso");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "aviso";
+    el.className = "aviso";
+    el.setAttribute("role", "status");
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `<span>${esc(msg)}</span>${desfazer ? '<button class="link" type="button">Desfazer</button>' : ""}`;
+  el.hidden = false;
+  if (desfazer) el.querySelector("button").addEventListener("click", () => { el.hidden = true; desfazer(); });
+  clearTimeout(timerAviso);
+  timerAviso = setTimeout(() => { el.hidden = true; }, 7000);
 }
 
 // ---------------------------------------------------------------------------
-// Caderno: abrir e salvar
+// Caderno: abrir, salvar e cópia local
 // ---------------------------------------------------------------------------
 
 function dadosIniciais() {
@@ -174,8 +110,30 @@ function dadosIniciais() {
   };
 }
 
-// Grava data/auth.json (troca de senha, código ou token). Em conflito, a versão
-// desta aba prevalece: ela acabou de ser confirmada por quem está usando.
+// Textos antigos (Markdown) → HTML do editor visual; entradas sem hora ganham
+// a hora em que foram criadas. Devolve true se mudou algo.
+function migrar(d) {
+  let mudou = false;
+  d.pastas ||= [];
+  d.textos ||= [];
+  d.removidos ||= {};
+  for (const t of d.textos) {
+    if (t.formato !== "html") {
+      t.corpo = markdownParaHtml(t.corpo || "");
+      for (const e of t.entradas || []) e.corpo = markdownParaHtml(e.corpo || "");
+      t.formato = "html";
+      mudou = true;
+    }
+    for (const e of t.entradas || []) {
+      if (!e.hora) {
+        e.hora = horaISO(new Date(e.criadoEm || Date.now()));
+        mudou = true;
+      }
+    }
+  }
+  return mudou;
+}
+
 async function gravarAuth(mensagem) {
   try {
     estado.shaAuth = await estado.github.gravar(CONFIG.authPath, estado.auth, estado.shaAuth, mensagem);
@@ -191,17 +149,31 @@ async function gravarCaderno(mensagem) {
   estado.shaCaderno = await estado.github.gravar(CONFIG.cadernoPath, arquivo, estado.shaCaderno, mensagem);
 }
 
+function agendarRascunho() {
+  clearTimeout(timerRascunho);
+  timerRascunho = setTimeout(() => guardarRascunho(estado.chave, estado.dados), RASCUNHO_MS);
+}
+
 function marcarAlterado() {
   estado.pendente = true;
-  estado.erro = "";
+  if (!estado.salvando) estado.erro = "";
   atualizarStatus();
+  agendarRascunho();
   clearTimeout(timerAutosalvar);
   timerAutosalvar = setTimeout(() => salvar(), AUTOSALVAR_MS);
 }
 
+function mensagemDeErro(e) {
+  if (e instanceof TypeError) {
+    return "Sem conexão. Suas alterações estão guardadas neste navegador e serão enviadas quando a internet voltar.";
+  }
+  return (e.message || String(e)) + (e instanceof ErroAcesso ? " Cole um novo token em ⚙ Configurações." : "");
+}
+
 async function salvar() {
   clearTimeout(timerAutosalvar);
-  if (!estado.pendente) return;
+  clearTimeout(timerNovaTentativa);
+  if (!estado.pendente || !estado.github) return;
   if (estado.salvando) { estado.salvarDeNovo = true; return; }
   estado.salvando = true;
   estado.pendente = false;
@@ -214,15 +186,25 @@ async function salvar() {
       // Outro aparelho salvou antes: junta as duas versões e tenta de novo.
       const remoto = await estado.github.ler(CONFIG.cadernoPath);
       if (remoto) {
-        estado.dados = mesclarDados(estado.dados, await decifrar(estado.chave, remoto.json));
+        const dadosRemotos = await decifrar(estado.chave, remoto.json);
+        migrar(dadosRemotos);
+        estado.dados = mesclarDados(estado.dados, dadosRemotos);
         estado.shaCaderno = remoto.sha;
       }
       await gravarCaderno(`Caderno: atualização (mesclada) ${agora()}`);
-      renderizarTudo();
+      renderizarPaineis();
+      if (estado.pagina !== "texto") renderizarPrincipal();
+    }
+    estado.erro = "";
+    if (!estado.pendente && !estado.salvarDeNovo) {
+      clearTimeout(timerRascunho);
+      apagarRascunho();
     }
   } catch (e) {
     estado.pendente = true;
-    estado.erro = (e.message || String(e)) + (e instanceof ErroAcesso ? " Cole um novo em ⚙ Configurações." : "");
+    estado.erro = mensagemDeErro(e);
+    guardarRascunho(estado.chave, estado.dados);
+    timerNovaTentativa = setTimeout(() => salvar(), NOVA_TENTATIVA_MS);
   } finally {
     estado.salvando = false;
     atualizarStatus();
@@ -233,14 +215,18 @@ async function salvar() {
 function atualizarStatus() {
   const el = $("#status");
   const botao = $("#salvar");
+  if (!el) return;
   el.className = "status";
+  el.title = "";
   if (estado.erro) {
     el.textContent = `⚠ ${estado.erro}`;
+    el.title = estado.erro;
     el.classList.add("erro");
   } else if (estado.salvando) {
     el.textContent = "Salvando…";
   } else if (estado.pendente) {
-    el.textContent = "Alterações não salvas";
+    el.textContent = "Alterações não enviadas";
+    el.title = "Já estão guardadas neste navegador; vão para o GitHub em instantes.";
     el.classList.add("pendente");
   } else {
     el.textContent = "Tudo salvo";
@@ -249,7 +235,6 @@ function atualizarStatus() {
   botao.disabled = estado.salvando || !estado.pendente;
 }
 
-// Com a chave mestra em mãos: decifra o token e conecta ao GitHub.
 async function conectar(chave) {
   estado.chave = chave;
   const { token } = await decifrar(chave, estado.auth.token);
@@ -258,7 +243,6 @@ async function conectar(chave) {
   estado.shaAuth = auth?.sha ?? null;
 }
 
-// Busca o caderno mais recente no GitHub e abre o aplicativo.
 async function abrirCaderno() {
   const arquivo = await estado.github.ler(CONFIG.cadernoPath);
   if (arquivo) {
@@ -269,11 +253,697 @@ async function abrirCaderno() {
     estado.shaCaderno = null;
     estado.pendente = true;
   }
-  estado.dados.removidos ||= {};
+  if (migrar(estado.dados)) estado.pendente = true;
+
+  // Alterações que ficaram só neste navegador (aba fechada, internet caiu…).
+  let recuperou = false;
+  const rascunho = await lerRascunho(estado.chave);
+  if (rascunho?.dados) {
+    migrar(rascunho.dados);
+    const antes = JSON.stringify(estado.dados);
+    estado.dados = mesclarDados(rascunho.dados, estado.dados);
+    if (JSON.stringify(estado.dados) !== antes) {
+      recuperou = true;
+      estado.pendente = true;
+    } else {
+      apagarRascunho();
+    }
+  }
+
   mostrarTela("app");
-  renderizarTudo();
   atualizarStatus();
+  retomarPosicao(recuperou);
+  if (recuperou) avisar("Recuperei alterações que ainda não tinham sido enviadas. Enviando agora…");
   if (estado.pendente) salvar();
+}
+
+// ---------------------------------------------------------------------------
+// Consultas
+// ---------------------------------------------------------------------------
+
+const pastaPorId = (id) => estado.dados.pastas.find((p) => p.id === id);
+const textoPorId = (id) => estado.dados.textos.find((t) => t.id === id);
+const pastasAtivas = () => estado.dados.pastas.filter((p) => !p.naLixeira);
+const porEdicao = (a, b) => (b.atualizadoEm || "").localeCompare(a.atualizadoEm || "");
+const textoAtivo = (t) => !t.naLixeira && pastaPorId(t.pastaId) && !pastaPorId(t.pastaId).naLixeira;
+const textosDaPasta = (id) => estado.dados.textos.filter((t) => t.pastaId === id && !t.naLixeira).sort(porEdicao);
+const momento = (e) => `${e.data} ${e.hora || "00:00"}`;
+const entradasAtivas = (t) => (t.entradas || []).filter((e) => !e.naLixeira).sort((a, b) => momento(b).localeCompare(momento(a)) || (b.criadoEm || "").localeCompare(a.criadoEm || ""));
+
+function itensNaLixeira() {
+  return {
+    pastas: estado.dados.pastas.filter((p) => p.naLixeira).sort((a, b) => b.naLixeira.localeCompare(a.naLixeira)),
+    textos: estado.dados.textos.filter((t) => t.naLixeira).sort((a, b) => b.naLixeira.localeCompare(a.naLixeira)),
+    entradas: estado.dados.textos
+      .filter((t) => !t.naLixeira)
+      .flatMap((t) => (t.entradas || []).filter((e) => e.naLixeira).map((entrada) => ({ texto: t, entrada })))
+      .sort((a, b) => b.entrada.naLixeira.localeCompare(a.entrada.naLixeira)),
+  };
+}
+
+function totalNaLixeira() {
+  const l = itensNaLixeira();
+  return l.pastas.length + l.textos.length + l.entradas.length;
+}
+
+function resultadosDaBusca() {
+  const q = semAcento(estado.busca);
+  return estado.dados.textos.filter(textoAtivo).filter((t) => {
+    const tudo = [t.titulo, textoDeHtml(t.corpo), ...entradasAtivas(t).map((e) => textoDeHtml(e.corpo))].join(" ");
+    return semAcento(tudo).includes(q);
+  }).sort(porEdicao);
+}
+
+function resumo(t) {
+  const fonte = t.tipo === "diario" ? (entradasAtivas(t)[0]?.corpo || t.corpo) : t.corpo;
+  return textoDeHtml(fonte).slice(0, 140);
+}
+
+function metaDoTexto(t, comPasta = false) {
+  const partes = [`editado ${quando(t.atualizadoEm)}`];
+  if (t.tipo === "diario") partes.push(plural(entradasAtivas(t).length, "entrada", "entradas"));
+  if (comPasta) partes.push(`📁 ${pastaPorId(t.pastaId)?.nome || "?"}`);
+  return partes.join(" · ");
+}
+
+const icone = (t) => (t.tipo === "diario" ? "📅" : "📄");
+
+// ---------------------------------------------------------------------------
+// Navegação
+// ---------------------------------------------------------------------------
+
+function salvarPosicao() {
+  guardarPosicao({
+    pagina: estado.pagina,
+    pastaAtual: estado.pastaAtual,
+    textoAtual: estado.textoAtual,
+    rolagem: $("#principal")?.scrollTop || 0,
+  });
+}
+
+function retomarPosicao(forcar) {
+  const p = lerPosicao();
+  const recente = p && Date.now() - (p.quando || 0) < RETOMAR_MS;
+  if (p && (forcar || recente)) {
+    if (p.pagina === "texto" && p.textoAtual && textoPorId(p.textoAtual)) return abrirTexto(p.textoAtual, { rolagem: p.rolagem });
+    if (p.pagina === "lixeira") return abrirLixeira();
+    if (p.pagina === "pasta" && pastaPorId(p.pastaAtual) && !pastaPorId(p.pastaAtual).naLixeira) return abrirPasta(p.pastaAtual);
+  }
+  abrirInicio();
+}
+
+function limparBusca() {
+  estado.busca = "";
+  $("#busca").value = "";
+}
+
+function irPara(pagina, rolagem = 0) {
+  estado.pagina = pagina;
+  const app = $("#app");
+  app.dataset.pagina = pagina;
+  const t = textoPorId(estado.textoAtual);
+  const semLista = pagina === "inicio" || pagina === "lixeira" || (pagina === "texto" && t && !textoAtivo(t));
+  app.dataset.lista = semLista ? "nao" : "sim";
+  fecharGaveta();
+  renderizarPaineis();
+  renderizarPrincipal();
+  $("#principal").scrollTop = rolagem;
+  salvarPosicao();
+}
+
+function abrirInicio() {
+  estado.pastaAtual = null;
+  estado.textoAtual = null;
+  limparBusca();
+  irPara("inicio");
+}
+
+function abrirPasta(id) {
+  estado.pastaAtual = id;
+  estado.textoAtual = null;
+  limparBusca();
+  irPara("pasta");
+}
+
+function abrirLixeira() {
+  estado.pastaAtual = LIXEIRA;
+  estado.textoAtual = null;
+  limparBusca();
+  irPara("lixeira");
+}
+
+function abrirTexto(id, { rolagem = 0 } = {}) {
+  const t = textoPorId(id);
+  if (!t) return abrirInicio();
+  estado.textoAtual = id;
+  if (textoAtivo(t)) estado.pastaAtual = t.pastaId;
+  else estado.pastaAtual = LIXEIRA;
+  irPara("texto", rolagem);
+}
+
+function buscar(q) {
+  estado.busca = q.trim();
+  $("#busca").value = q;
+  if (estado.busca) {
+    estado.textoAtual = null;
+    irPara("busca");
+  } else if (pastaPorId(estado.pastaAtual)) {
+    abrirPasta(estado.pastaAtual);
+  } else {
+    abrirInicio();
+  }
+}
+
+function voltar() {
+  if (estado.pastaAtual === LIXEIRA) return abrirLixeira();
+  if (pastaPorId(estado.pastaAtual)) return abrirPasta(estado.pastaAtual);
+  abrirInicio();
+}
+
+function abrirGaveta() { $("#app").classList.add("gaveta-aberta"); }
+function fecharGaveta() { $("#app")?.classList.remove("gaveta-aberta"); }
+
+// ---------------------------------------------------------------------------
+// Painéis laterais
+// ---------------------------------------------------------------------------
+
+function renderizarPaineis() {
+  $("#painel-pastas").classList.toggle("recolhido", estado.recolhido.pastas);
+  $("#painel-lista").classList.toggle("recolhido", estado.recolhido.lista);
+
+  $("#lista-pastas").innerHTML = pastasAtivas().map((p) => `
+    <button class="pasta ${estado.pastaAtual === p.id && estado.pagina !== "busca" ? "ativa" : ""}" data-pasta="${esc(p.id)}">
+      <span>📁 ${esc(p.nome)}</span><span class="contagem">${textosDaPasta(p.id).length}</span>
+    </button>`).join("");
+  const n = totalNaLixeira();
+  const lix = $("#abrir-lixeira");
+  lix.innerHTML = `<span>🗑 Lixeira</span><span class="contagem">${n || ""}</span>`;
+  lix.classList.toggle("ativa", estado.pastaAtual === LIXEIRA);
+  $("#voltar-inicio").classList.toggle("ativa", estado.pagina === "inicio");
+
+  const pasta = pastaPorId(estado.pastaAtual);
+  const lista = estado.pagina === "busca" ? resultadosDaBusca() : pasta ? textosDaPasta(pasta.id) : [];
+  $("#titulo-lista").textContent = estado.pagina === "busca" ? "Resultados" : pasta ? pasta.nome : "";
+  $("#lista-textos").innerHTML = lista.length
+    ? lista.map((t) => `
+      <li><button class="item ${t.id === estado.textoAtual ? "ativo" : ""}" data-texto="${esc(t.id)}">
+        <span class="item-titulo">${icone(t)} ${esc(t.titulo || "Sem título")}</span>
+        <span class="item-meta">${esc(quando(t.atualizadoEm))}</span>
+      </button></li>`).join("")
+    : `<li class="vazio">Nenhum texto.</li>`;
+}
+
+function alternarPainel(qual) {
+  estado.recolhido[qual] = !estado.recolhido[qual];
+  if (qual === "pastas") gravarLS("caderno.recolher.pastas", estado.recolhido.pastas ? "1" : "0");
+  renderizarPaineis();
+}
+
+// ---------------------------------------------------------------------------
+// Área principal
+// ---------------------------------------------------------------------------
+
+function renderizarPrincipal() {
+  const el = $("#principal");
+  switch (estado.pagina) {
+    case "pasta": return paginaPasta(el);
+    case "lixeira": return paginaLixeira(el);
+    case "busca": return paginaBusca(el);
+    case "texto": return paginaTexto(el);
+    default: return paginaInicio(el);
+  }
+}
+
+function itemGrande(t, comPasta = false) {
+  const r = resumo(t);
+  return `
+    <li><button class="item-grande" data-texto="${esc(t.id)}">
+      <span class="item-icone">${icone(t)}</span>
+      <span class="item-corpo">
+        <span class="item-titulo">${esc(t.titulo || "Sem título")}</span>
+        <span class="item-meta">${esc(metaDoTexto(t, comPasta))}</span>
+        ${r ? `<span class="item-resumo">${esc(r)}</span>` : ""}
+      </span>
+    </button></li>`;
+}
+
+function paginaInicio(el) {
+  const cartoes = pastasAtivas().map((p) => {
+    const textos = textosDaPasta(p.id);
+    const recentes = textos.slice(0, 3).map((t) => `<li>${icone(t)} ${esc(t.titulo || "Sem título")}</li>`).join("");
+    return `
+      <button class="cartao-pasta" data-pasta="${esc(p.id)}">
+        <span class="cartao-icone">📁</span>
+        <span class="cartao-nome">${esc(p.nome)}</span>
+        <span class="cartao-meta">${plural(textos.length, "texto", "textos")}${textos[0] ? ` · editado ${esc(quando(textos[0].atualizadoEm))}` : ""}</span>
+        ${recentes ? `<ul class="cartao-recentes">${recentes}</ul>` : ""}
+      </button>`;
+  }).join("");
+  const n = totalNaLixeira();
+  el.innerHTML = `
+    <div class="pagina">
+      <div class="pagina-topo">
+        <h1>Minhas pastas</h1>
+        <input type="search" id="busca-inicio" placeholder="Buscar em tudo…" value="${esc(estado.busca)}">
+      </div>
+      <div class="grade-pastas">
+        ${cartoes}
+        <button class="cartao-pasta nova" data-acao="nova-pasta">
+          <span class="cartao-icone">＋</span><span class="cartao-nome">Nova pasta</span>
+        </button>
+        <button class="cartao-pasta lixeira" data-acao="abrir-lixeira">
+          <span class="cartao-icone">🗑</span><span class="cartao-nome">Lixeira</span>
+          <span class="cartao-meta">${n ? plural(n, "item", "itens") : "vazia"}</span>
+        </button>
+      </div>
+    </div>`;
+  el.querySelector("#busca-inicio").addEventListener("input", (e) => {
+    clearTimeout(timerBusca);
+    timerBusca = setTimeout(() => { buscar(e.target.value); requestAnimationFrame(() => $("#busca").focus()); }, 250);
+  });
+}
+
+function paginaPasta(el) {
+  const p = pastaPorId(estado.pastaAtual);
+  if (!p) return abrirInicio();
+  const textos = textosDaPasta(p.id);
+  el.innerHTML = `
+    <div class="pagina">
+      <div class="pagina-topo">
+        <h1>📁 ${esc(p.nome)}</h1>
+        <div class="acoes">
+          <button class="botao pequeno" data-acao="renomear-pasta">Renomear</button>
+          <button class="botao-lixeira" data-acao="pasta-lixeira">Enviar para a lixeira</button>
+        </div>
+      </div>
+      <div class="acoes novo">
+        <button class="botao primario" data-acao="novo-texto">+ Novo texto</button>
+        <button class="botao" data-acao="novo-diario">+ Novo diário</button>
+      </div>
+      <p class="dica"><strong>Texto</strong>: um documento único (ex.: um protocolo). <strong>Diário</strong>: um registro em entradas com data e hora (ex.: a revisão de literatura feita um pouco por dia).</p>
+      ${textos.length ? `<ul class="lista-grande">${textos.map((t) => itemGrande(t)).join("")}</ul>` : `<p class="vazio">Nenhum texto nesta pasta ainda.</p>`}
+    </div>`;
+}
+
+function paginaBusca(el) {
+  const r = resultadosDaBusca();
+  el.innerHTML = `
+    <div class="pagina">
+      <div class="pagina-topo"><h1>Busca: “${esc(estado.busca)}”</h1></div>
+      <p class="dica">${plural(r.length, "texto encontrado", "textos encontrados")}.</p>
+      ${r.length ? `<ul class="lista-grande">${r.map((t) => itemGrande(t, true)).join("")}</ul>` : ""}
+    </div>`;
+}
+
+function paginaLixeira(el) {
+  const l = itensNaLixeira();
+  const linha = (titulo, meta, botoes) => `
+    <li class="linha-lixeira">
+      <span class="item-corpo"><span class="item-titulo">${titulo}</span><span class="item-meta">${meta}</span></span>
+      <span class="acoes">${botoes}</span>
+    </li>`;
+  const secao = (nome, itens) => (itens.length ? `<h2>${nome}</h2><ul class="lista-lixeira">${itens.join("")}</ul>` : "");
+  const vazia = !l.pastas.length && !l.textos.length && !l.entradas.length;
+  el.innerHTML = `
+    <div class="pagina">
+      <div class="pagina-topo"><h1>🗑 Lixeira</h1></div>
+      <p class="dica">Nada que vem para cá é apagado. Restaure quando quiser.</p>
+      ${vazia ? `<p class="vazio">A lixeira está vazia.</p>` : ""}
+      ${secao("Pastas", l.pastas.map((p) => linha(
+        `📁 ${esc(p.nome)}`,
+        `${plural(estado.dados.textos.filter((t) => t.pastaId === p.id).length, "texto", "textos")} dentro · enviada ${esc(quando(p.naLixeira))}`,
+        `<button class="botao pequeno" data-restaurar-pasta="${esc(p.id)}">Restaurar</button>`)))}
+      ${secao("Textos", l.textos.map((t) => linha(
+        `${icone(t)} ${esc(t.titulo || "Sem título")}`,
+        `da pasta ${esc(pastaPorId(t.pastaId)?.nome || "?")} · enviado ${esc(quando(t.naLixeira))}`,
+        `<button class="botao pequeno" data-texto="${esc(t.id)}">Ver</button><button class="botao pequeno" data-restaurar-texto="${esc(t.id)}">Restaurar</button>`)))}
+      ${secao("Entradas de diário", l.entradas.map(({ texto, entrada }) => linha(
+        `📅 Entrada de ${esc(dataCurta(entrada.data))}, ${esc(entrada.hora)}`,
+        `do diário “${esc(texto.titulo || "Sem título")}” · enviada ${esc(quando(entrada.naLixeira))}${textoDeHtml(entrada.corpo) ? ` · “${esc(textoDeHtml(entrada.corpo).slice(0, 60))}…”` : ""}`,
+        `<button class="botao pequeno" data-restaurar-entrada="${esc(entrada.id)}" data-diario="${esc(texto.id)}">Restaurar</button>`)))}
+    </div>`;
+}
+
+// ── Página de um texto ──
+
+function tocarTexto(t) {
+  t.atualizadoEm = agora();
+  marcarAlterado();
+  renderizarPaineis();
+}
+
+function paginaTexto(el) {
+  const t = textoPorId(estado.textoAtual);
+  if (!t) return abrirInicio();
+  const naLixeira = !textoAtivo(t);
+  const modo = naLixeira ? "ler" : estado.modo;
+  const escrever = modo === "escrever";
+  const origem = naLixeira ? "Lixeira" : pastaPorId(t.pastaId)?.nome || "Voltar";
+  const opcoesPasta = pastasAtivas().map((p) => `<option value="${esc(p.id)}" ${p.id === t.pastaId ? "selected" : ""}>${esc(p.nome)}</option>`).join("");
+
+  el.innerHTML = `
+    <div class="pagina pagina-texto" data-modo="${modo}">
+      <div class="barra-texto">
+        <button class="botao pequeno" data-acao="voltar">← ${esc(origem)}</button>
+        ${naLixeira ? "" : `
+        <span class="modos" role="group" aria-label="Modo">
+          <button data-modo="escrever" class="${escrever ? "ativo" : ""}">Escrever</button><button data-modo="ler" class="${escrever ? "" : "ativo"}">Ler</button>
+        </span>`}
+        <span class="espaco"></span>
+        <div class="menu-caixa">
+          <button class="botao pequeno" data-acao="menu-exportar">Exportar ▾</button>
+          <div class="menu-barra direita" id="menu-exportar" hidden>
+            <button class="menu-item" data-exportar="pdf">PDF</button>
+            <button class="menu-item" data-exportar="docx">Word (.docx)</button>
+            <button class="menu-item" data-exportar="txt">Texto (.txt)</button>
+          </div>
+        </div>
+        ${naLixeira
+          ? `<button class="botao pequeno primario" data-restaurar-texto="${esc(t.id)}">Restaurar</button>`
+          : `<button class="botao-lixeira" data-acao="texto-lixeira">Enviar para a lixeira</button>`}
+      </div>
+      ${naLixeira ? `<p class="aviso-lixeira">Este texto está na lixeira desde ${esc(quando(t.naLixeira))}. Restaure para voltar a editar.</p>` : ""}
+      ${escrever ? `<div id="barra-formatacao"></div>` : ""}
+      <div class="folha">
+        <input class="titulo-texto documento" id="titulo-texto" value="${esc(t.titulo)}" placeholder="Título" ${escrever ? "" : "readonly"}>
+        <div class="meta-texto">
+          <label>📁 <select id="mover-texto" ${naLixeira ? "disabled" : ""}>${opcoesPasta}</select></label>
+          <span>${t.tipo === "diario" ? "📅 Diário" : "📄 Texto"}</span>
+          <span>criado ${esc(quando(t.criadoEm))}</span>
+          <span>editado ${esc(quando(t.atualizadoEm))}</span>
+        </div>
+        ${t.tipo === "diario" ? `
+          <details class="descricao" ${t.corpo ? "open" : ""}>
+            <summary>Sobre este diário <span class="suave">(objetivo, perguntas, palavras-chave)</span></summary>
+            <div id="corpo-texto"></div>
+          </details>
+          <div class="diario-topo">
+            ${naLixeira ? "" : `<button class="botao primario" data-acao="nova-entrada">+ Nova entrada</button>`}
+            <span class="dica">Cada entrada guarda a data e a hora em que foi escrita. A mais recente fica no topo.</span>
+          </div>
+          <div class="linha-do-tempo" id="entradas"></div>`
+        : `<div id="corpo-texto"></div>`}
+      </div>
+    </div>`;
+
+  if (escrever) montarBarra($("#barra-formatacao"));
+
+  const titulo = $("#titulo-texto");
+  titulo.addEventListener("input", () => { t.titulo = titulo.value; tocarTexto(t); });
+  $("#mover-texto").addEventListener("change", (e) => {
+    t.pastaId = e.target.value;
+    estado.pastaAtual = t.pastaId;
+    tocarTexto(t);
+    $("[data-acao='voltar']").textContent = `← ${pastaPorId(t.pastaId).nome}`;
+  });
+
+  montarEditor($("#corpo-texto"), {
+    html: t.corpo,
+    editavel: escrever,
+    placeholder: t.tipo === "diario" ? "Objetivo do diário, perguntas da revisão, palavras-chave…" : "Comece a escrever…",
+    aoMudar: (html) => { t.corpo = html; tocarTexto(t); },
+  });
+
+  if (t.tipo === "diario") renderizarEntradas(t, escrever && !naLixeira);
+}
+
+function renderizarEntradas(t, escrever) {
+  const caixa = $("#entradas");
+  const entradas = entradasAtivas(t);
+  if (!entradas.length) {
+    caixa.innerHTML = `<p class="vazio">Nenhuma entrada ainda.${escrever ? " Clique em “+ Nova entrada” para registrar a primeira." : ""}</p>`;
+    return;
+  }
+  caixa.innerHTML = "";
+  const total = entradas.length;
+  entradas.forEach((en, i) => {
+    const art = document.createElement("article");
+    art.className = "entrada";
+    art.dataset.entrada = en.id;
+    art.innerHTML = `
+      <div class="entrada-cabeca">
+        <span class="entrada-num">nº ${total - i}</span>
+        ${escrever
+          ? `<input type="date" class="entrada-data" value="${esc(en.data)}" title="Data">
+             <input type="time" class="entrada-hora" value="${esc(en.hora)}" title="Hora">`
+          : `<span class="entrada-quando"><strong>${esc(dataLonga(en.data))}</strong> · ${esc(en.hora)}</span>`}
+        ${i === 0 ? `<span class="selo">mais recente</span>` : ""}
+        <span class="espaco"></span>
+        ${escrever ? `<button class="botao-lixeira" data-acao="entrada-lixeira">Enviar para a lixeira</button>` : ""}
+      </div>
+      <div class="entrada-texto"></div>`;
+    caixa.appendChild(art);
+    montarEditor(art.querySelector(".entrada-texto"), {
+      html: en.corpo,
+      editavel: escrever,
+      placeholder: "O que você leu ou fez? Referências, achados, próximos passos…",
+      aoMudar: (html) => { en.corpo = html; en.atualizadoEm = agora(); tocarTexto(t); },
+    });
+    if (escrever) {
+      const reordenar = () => { tocarTexto(t); renderizarEntradas(t, true); };
+      art.querySelector(".entrada-data").addEventListener("change", (e) => { if (e.target.value) { en.data = e.target.value; en.atualizadoEm = agora(); reordenar(); } });
+      art.querySelector(".entrada-hora").addEventListener("change", (e) => { if (e.target.value) { en.hora = e.target.value; en.atualizadoEm = agora(); reordenar(); } });
+      art.querySelector("[data-acao='entrada-lixeira']").addEventListener("click", () => {
+        en.naLixeira = agora();
+        en.atualizadoEm = agora();
+        tocarTexto(t);
+        renderizarEntradas(t, true);
+        avisar(`Entrada de ${dataCurta(en.data)}, ${en.hora} enviada para a lixeira.`, () => {
+          en.naLixeira = null;
+          en.atualizadoEm = agora();
+          tocarTexto(t);
+          if (estado.textoAtual === t.id) renderizarEntradas(t, estado.modo === "escrever");
+        });
+      });
+    }
+  });
+}
+
+function novaEntrada(t) {
+  if (estado.modo !== "escrever") {
+    estado.modo = "escrever";
+    gravarLS("caderno.modo", "escrever");
+  }
+  const d = new Date();
+  const en = { id: novoId("entrada"), data: dataISO(d), hora: horaISO(d), corpo: "", criadoEm: agora(), atualizadoEm: agora() };
+  t.entradas ||= [];
+  t.entradas.push(en);
+  tocarTexto(t);
+  renderizarPrincipal();
+  const art = document.querySelector(`[data-entrada="${en.id}"]`);
+  art?.scrollIntoView({ behavior: "smooth", block: "center" });
+  art?.querySelector(".entrada-texto")?.focus();
+}
+
+function novoTexto(tipo) {
+  const pastaId = estado.pastaAtual;
+  if (!pastaPorId(pastaId)) return;
+  const t = agora();
+  const texto = {
+    id: novoId("texto"), pastaId, tipo, formato: "html",
+    titulo: tipo === "diario" ? `Diário — ${new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}` : "",
+    corpo: "", entradas: tipo === "diario" ? [] : undefined,
+    criadoEm: t, atualizadoEm: t,
+  };
+  estado.dados.textos.push(texto);
+  marcarAlterado();
+  if (estado.modo !== "escrever") { estado.modo = "escrever"; gravarLS("caderno.modo", "escrever"); }
+  abrirTexto(texto.id);
+  const titulo = $("#titulo-texto");
+  titulo.focus();
+  if (tipo === "diario") titulo.select();
+}
+
+// ── Lixeira ──
+
+function textoParaLixeira(t) {
+  t.naLixeira = agora();
+  t.atualizadoEm = agora();
+  marcarAlterado();
+  const pasta = t.pastaId;
+  abrirPasta(pasta);
+  avisar(`“${t.titulo || "Sem título"}” foi para a lixeira.`, () => restaurarTexto(t.id, false));
+}
+
+function pastaParaLixeira(p) {
+  p.naLixeira = agora();
+  p.atualizadoEm = agora();
+  marcarAlterado();
+  abrirInicio();
+  avisar(`A pasta “${p.nome}” foi para a lixeira (com os textos dela).`, () => restaurarPasta(p.id));
+}
+
+function restaurarPasta(id) {
+  const p = pastaPorId(id);
+  if (!p) return;
+  p.naLixeira = null;
+  p.atualizadoEm = agora();
+  marcarAlterado();
+  renderizarPaineis();
+  renderizarPrincipal();
+  avisar(`Pasta “${p.nome}” restaurada.`);
+}
+
+function restaurarTexto(id, abrir = true) {
+  const t = textoPorId(id);
+  if (!t) return;
+  t.naLixeira = null;
+  t.atualizadoEm = agora();
+  let p = pastaPorId(t.pastaId);
+  if (!p) {
+    p = pastasAtivas()[0] || criarPasta("Restaurados");
+    t.pastaId = p.id;
+  }
+  if (p.naLixeira) { p.naLixeira = null; p.atualizadoEm = agora(); }
+  marcarAlterado();
+  if (abrir) abrirTexto(t.id);
+  else { renderizarPaineis(); renderizarPrincipal(); }
+  avisar(`“${t.titulo || "Sem título"}” restaurado em ${p.nome}.`);
+}
+
+function restaurarEntrada(diarioId, entradaId) {
+  const t = textoPorId(diarioId);
+  const en = t?.entradas?.find((e) => e.id === entradaId);
+  if (!en) return;
+  en.naLixeira = null;
+  en.atualizadoEm = agora();
+  tocarTexto(t);
+  renderizarPrincipal();
+  avisar(`Entrada restaurada no diário “${t.titulo || "Sem título"}”.`);
+}
+
+function criarPasta(nome) {
+  const t = agora();
+  const p = { id: novoId("pasta"), nome, criadoEm: t, atualizadoEm: t };
+  estado.dados.pastas.push(p);
+  marcarAlterado();
+  return p;
+}
+
+function novaPasta() {
+  const nome = prompt("Nome da nova pasta:");
+  if (!nome?.trim()) return;
+  abrirPasta(criarPasta(nome.trim()).id);
+}
+
+async function exportar(formato) {
+  const t = textoPorId(estado.textoAtual);
+  if (!t) return;
+  try {
+    if (formato === "pdf") exportarPdf(t);
+    else if (formato === "txt") exportarTxt(t);
+    else await exportarDocx(t);
+  } catch (e) {
+    alert(`Não foi possível exportar: ${e.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Eventos do aplicativo
+// ---------------------------------------------------------------------------
+
+let timerBusca = null;
+let timerRolagem = null;
+
+function configurarApp() {
+  $("#ir-inicio").addEventListener("click", abrirInicio);
+  $("#voltar-inicio").addEventListener("click", abrirInicio);
+  $("#abrir-lixeira").addEventListener("click", abrirLixeira);
+  $("#nova-pasta").addEventListener("click", novaPasta);
+  $("#salvar").addEventListener("click", () => salvar());
+  $("#abrir-gaveta").addEventListener("click", () => ($("#app").classList.contains("gaveta-aberta") ? fecharGaveta() : abrirGaveta()));
+  $("#fundo-gaveta").addEventListener("click", fecharGaveta);
+
+  document.querySelectorAll("[data-painel]").forEach((b) => b.addEventListener("click", () => alternarPainel(b.dataset.painel)));
+
+  $("#lista-pastas").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-pasta]");
+    if (b) abrirPasta(b.dataset.pasta);
+  });
+  $("#lista-textos").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-texto]");
+    if (b) abrirTexto(b.dataset.texto);
+  });
+  $("#busca").addEventListener("input", (e) => {
+    clearTimeout(timerBusca);
+    timerBusca = setTimeout(() => buscar(e.target.value), 250);
+  });
+
+  // Cliques na área principal (o conteúdo é redesenhado a cada página).
+  $("#principal").addEventListener("click", (e) => {
+    const alvo = e.target.closest("button, [data-pasta], [data-texto]");
+    if (!alvo) {
+      $("#menu-exportar")?.setAttribute("hidden", "");
+      return;
+    }
+    const d = alvo.dataset;
+    const t = textoPorId(estado.textoAtual);
+    if (d.restaurarPasta) return restaurarPasta(d.restaurarPasta);
+    if (d.restaurarTexto) return restaurarTexto(d.restaurarTexto);
+    if (d.restaurarEntrada) return restaurarEntrada(d.diario, d.restaurarEntrada);
+    if (d.exportar) { $("#menu-exportar").hidden = true; return exportar(d.exportar); }
+    if (d.modo) {
+      estado.modo = d.modo;
+      gravarLS("caderno.modo", d.modo);
+      const rolagem = $("#principal").scrollTop;
+      renderizarPrincipal();
+      $("#principal").scrollTop = rolagem;
+      return;
+    }
+    switch (d.acao) {
+      case "voltar": return voltar();
+      case "nova-pasta": return novaPasta();
+      case "abrir-lixeira": return abrirLixeira();
+      case "novo-texto": return novoTexto("texto");
+      case "novo-diario": return novoTexto("diario");
+      case "nova-entrada": return novaEntrada(t);
+      case "texto-lixeira": return textoParaLixeira(t);
+      case "pasta-lixeira": return pastaParaLixeira(pastaPorId(estado.pastaAtual));
+      case "menu-exportar": { const m = $("#menu-exportar"); m.hidden = !m.hidden; return; }
+      case "renomear-pasta": {
+        const p = pastaPorId(estado.pastaAtual);
+        const nome = prompt("Novo nome da pasta:", p.nome);
+        if (!nome?.trim()) return;
+        p.nome = nome.trim();
+        p.atualizadoEm = agora();
+        marcarAlterado();
+        renderizarPaineis();
+        return renderizarPrincipal();
+      }
+    }
+    if (d.pasta) return abrirPasta(d.pasta);
+    if (d.texto) return abrirTexto(d.texto);
+  });
+
+  $("#principal").addEventListener("scroll", () => {
+    clearTimeout(timerRolagem);
+    timerRolagem = setTimeout(salvarPosicao, 400);
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && estado.chave) {
+      e.preventDefault();
+      salvar();
+    }
+    if (e.key === "Escape") { fecharGaveta(); $("#menu-exportar")?.setAttribute("hidden", ""); }
+  });
+
+  // Nunca perder nada: cópia local imediata ao sair/esconder a aba,
+  // reenvio quando a internet voltar.
+  const guardarJa = () => {
+    if (!estado.chave || !estado.pendente) return;
+    clearTimeout(timerRascunho);
+    guardarRascunho(estado.chave, estado.dados);
+    salvarPosicao();
+  };
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") guardarJa(); });
+  window.addEventListener("pagehide", guardarJa);
+  window.addEventListener("online", () => { if (estado.pendente) salvar(); });
+  window.addEventListener("beforeunload", (e) => {
+    if (estado.pendente || estado.salvando) { guardarJa(); e.preventDefault(); e.returnValue = ""; }
+  });
+
+  configurarDialogoConfig();
 }
 
 // ---------------------------------------------------------------------------
@@ -406,414 +1076,8 @@ function configurarTelasDeEntrada() {
 }
 
 // ---------------------------------------------------------------------------
-// Pastas, lista e editor
-// ---------------------------------------------------------------------------
-
-const pastaPorId = (id) => estado.dados.pastas.find((p) => p.id === id);
-const textoPorId = (id) => estado.dados.textos.find((t) => t.id === id);
-
-function textoCompleto(t) {
-  return [t.titulo, t.corpo, ...(t.entradas || []).map((e) => e.corpo)].join("\n");
-}
-
-function textosVisiveis() {
-  let lista = estado.dados.textos;
-  if (estado.busca) {
-    const q = semAcento(estado.busca);
-    lista = lista.filter((t) => semAcento(textoCompleto(t)).includes(q));
-  } else {
-    lista = lista.filter((t) => t.pastaId === estado.pastaAtual);
-  }
-  return [...lista].sort((a, b) => (b.atualizadoEm || "").localeCompare(a.atualizadoEm || ""));
-}
-
-function definirVista(vista) {
-  $("#app").dataset.vista = vista;
-}
-
-function renderizarTudo() {
-  if (estado.pastaAtual && !pastaPorId(estado.pastaAtual)) estado.pastaAtual = null;
-  if (estado.textoAtual && !textoPorId(estado.textoAtual)) estado.textoAtual = null;
-  if (!estado.pastaAtual && !estado.busca) definirVista("inicio");
-  renderizarInicio();
-  renderizarPastas();
-  renderizarLista();
-  renderizarEditor();
-}
-
-function renderizarPastas() {
-  const contar = (id) => estado.dados.textos.filter((t) => t.pastaId === id).length;
-  const item = (id, nome, n) => `
-    <button class="pasta ${estado.pastaAtual === id && !estado.busca ? "ativa" : ""}" data-pasta="${esc(id)}">
-      <span>${esc(nome)}</span><span class="contagem">${n}</span>
-    </button>`;
-  $("#lista-pastas").innerHTML = estado.dados.pastas.map((p) => item(p.id, `📁 ${p.nome}`, contar(p.id))).join("");
-}
-
-// Tela inicial: uma pasta por cartão, com os textos editados por último.
-function renderizarInicio() {
-  const cartoes = estado.dados.pastas.map((p) => {
-    const textos = estado.dados.textos
-      .filter((t) => t.pastaId === p.id)
-      .sort((a, b) => (b.atualizadoEm || "").localeCompare(a.atualizadoEm || ""));
-    const recentes = textos.slice(0, 3).map((t) => `<li>${t.tipo === "diario" ? "📅 " : ""}${esc(t.titulo || "Sem título")}</li>`).join("");
-    return `
-      <button class="cartao-pasta" data-pasta="${esc(p.id)}">
-        <span class="cartao-icone">📁</span>
-        <span class="cartao-nome">${esc(p.nome)}</span>
-        <span class="cartao-meta">${textos.length} ${textos.length === 1 ? "texto" : "textos"}${textos[0] ? ` · editado ${esc(quando(textos[0].atualizadoEm))}` : ""}</span>
-        ${recentes ? `<ul class="cartao-recentes">${recentes}</ul>` : ""}
-      </button>`;
-  }).join("");
-  $("#grade-pastas").innerHTML = cartoes + `
-    <button class="cartao-pasta nova" id="nova-pasta-inicio">
-      <span class="cartao-icone">＋</span>
-      <span class="cartao-nome">Nova pasta</span>
-    </button>`;
-}
-
-function limparBusca() {
-  estado.busca = "";
-  $("#busca").value = "";
-  $("#busca-inicio").value = "";
-}
-
-function abrirInicio() {
-  estado.pastaAtual = null;
-  estado.textoAtual = null;
-  limparBusca();
-  renderizarTudo();
-}
-
-function abrirPasta(id) {
-  estado.pastaAtual = id;
-  estado.textoAtual = null;
-  estado.entradaEditando = null;
-  limparBusca();
-  renderizarTudo();
-  definirVista("lista");
-}
-
-function renderizarLista() {
-  const pasta = pastaPorId(estado.pastaAtual);
-  $("#titulo-pasta").textContent = estado.busca ? `Busca: “${estado.busca}”` : pasta ? pasta.nome : "";
-  $("#menu-pasta").hidden = !pasta || !!estado.busca;
-  document.querySelector(".acoes.novo").hidden = !pasta || !!estado.busca;
-  const lista = textosVisiveis();
-  if (!lista.length) {
-    $("#lista-textos").innerHTML = `<li class="vazio">${estado.busca ? "Nada encontrado." : "Nenhum texto aqui ainda."}</li>`;
-    return;
-  }
-  $("#lista-textos").innerHTML = lista.map((t) => {
-    const trecho = (t.tipo === "diario" ? (t.entradas?.[0]?.corpo ?? t.corpo) : t.corpo) || "";
-    const resumo = trecho.replace(/[#*_>`\-\[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110);
-    const nomePasta = estado.busca ? pastaPorId(t.pastaId)?.nome : "";
-    return `
-      <li>
-        <button class="item ${t.id === estado.textoAtual ? "ativo" : ""}" data-texto="${esc(t.id)}">
-          <span class="item-titulo">${t.tipo === "diario" ? "📅 " : ""}${esc(t.titulo || "Sem título")}</span>
-          <span class="item-meta">${esc(quando(t.atualizadoEm))}${nomePasta ? ` · ${esc(nomePasta)}` : ""}${t.tipo === "diario" ? ` · ${(t.entradas || []).length} entradas` : ""}</span>
-          ${resumo ? `<span class="item-resumo">${esc(resumo)}</span>` : ""}
-        </button>
-      </li>`;
-  }).join("");
-}
-
-function modoEditor() {
-  try { return localStorage.getItem("caderno.modo") || "dividir"; } catch { return "dividir"; }
-}
-
-function definirModoEditor(modo) {
-  try { localStorage.setItem("caderno.modo", modo); } catch {}
-  document.querySelectorAll(".modos button").forEach((b) => b.classList.toggle("ativo", b.dataset.modo === modo));
-  document.querySelectorAll(".md:not(.so-leitura)").forEach((el) => { el.dataset.modo = modo; });
-  document.querySelectorAll(".md textarea").forEach(autoAltura);
-}
-
-function tocarTexto(t) {
-  t.atualizadoEm = agora();
-  marcarAlterado();
-  renderizarLista();
-}
-
-function renderizarEditor() {
-  const el = $("#painel-editor");
-  const t = textoPorId(estado.textoAtual);
-  if (!t) {
-    el.innerHTML = `<div class="editor-vazio"><p>Escolha um texto ao lado ou crie um novo.</p></div>`;
-    return;
-  }
-  const modo = modoEditor();
-  const opcoesPasta = estado.dados.pastas.map((p) => `<option value="${esc(p.id)}" ${p.id === t.pastaId ? "selected" : ""}>${esc(p.nome)}</option>`).join("");
-  el.innerHTML = `
-    <div class="editor-topo">
-      <button class="icone so-celular" id="voltar-lista" title="Voltar">←</button>
-      <input class="titulo" id="titulo-texto" value="${esc(t.titulo)}" placeholder="Título">
-    </div>
-    <div class="editor-meta">
-      <label>Pasta <select id="mover-texto">${opcoesPasta}</select></label>
-      <span class="suave">Criado ${esc(quando(t.criadoEm))} · editado ${esc(quando(t.atualizadoEm))}</span>
-      <span class="modos">
-        <button data-modo="escrever" class="${modo === "escrever" ? "ativo" : ""}">Escrever</button><button data-modo="dividir" class="${modo === "dividir" ? "ativo" : ""}">Dividir</button><button data-modo="visualizar" class="${modo === "visualizar" ? "ativo" : ""}">Ler</button>
-      </span>
-      <button class="icone" id="excluir-texto" title="Excluir texto">🗑</button>
-    </div>
-    ${t.tipo === "diario"
-      ? `<details class="descricao" ${t.corpo ? "open" : ""}><summary>Descrição do diário</summary><div id="corpo-texto"></div></details>`
-      : `<div id="corpo-texto"></div>`}
-    ${t.tipo === "diario" ? `
-      <div class="diario-topo">
-        <button class="botao primario" id="entrada-hoje">+ Entrada de hoje</button>
-        <span class="suave">${esc(dataLonga(hojeISO()))}</span>
-      </div>
-      <div id="entradas"></div>` : ""}
-  `;
-
-  $("#titulo-texto").addEventListener("input", (e) => { t.titulo = e.target.value; tocarTexto(t); });
-  $("#mover-texto").addEventListener("change", (e) => { t.pastaId = e.target.value; tocarTexto(t); renderizarPastas(); });
-  $("#excluir-texto").addEventListener("click", () => excluirTexto(t));
-  $("#voltar-lista").addEventListener("click", () => definirVista("lista"));
-  el.querySelectorAll(".modos button").forEach((b) => b.addEventListener("click", () => definirModoEditor(b.dataset.modo)));
-
-  const corpo = $("#corpo-texto");
-  if (t.tipo === "diario") {
-    corpo.classList.add("descricao-diario");
-    corpo.closest("details").addEventListener("toggle", () => corpo.querySelectorAll("textarea").forEach(autoAltura));
-  }
-  montarMarkdown(corpo, {
-    valor: t.corpo,
-    modo,
-    placeholder: t.tipo === "diario"
-      ? "Descrição do diário (opcional): objetivo, perguntas da revisão, palavras-chave…"
-      : "Escreva em Markdown: # Título, **negrito**, - lista, - [ ] passo a cumprir, | tabela |…",
-    aoMudar: (v) => { t.corpo = v; tocarTexto(t); },
-  });
-
-  if (t.tipo === "diario") {
-    $("#entrada-hoje").addEventListener("click", () => entradaDeHoje(t));
-    renderizarEntradas(t);
-  }
-}
-
-function renderizarEntradas(t) {
-  const caixa = $("#entradas");
-  const entradas = [...(t.entradas || [])].sort((a, b) => b.data.localeCompare(a.data) || (b.criadoEm || "").localeCompare(a.criadoEm || ""));
-  if (!entradas.length) {
-    caixa.innerHTML = `<p class="vazio">Nenhuma entrada ainda. Clique em “Entrada de hoje” para começar.</p>`;
-    return;
-  }
-  caixa.innerHTML = "";
-  for (const en of entradas) {
-    const editando = estado.entradaEditando === en.id;
-    const art = document.createElement("article");
-    art.className = `entrada ${editando ? "editando" : ""}`;
-    art.dataset.entrada = en.id;
-    art.innerHTML = `
-      <header>
-        ${editando
-          ? `<input type="date" value="${esc(en.data)}" class="data-entrada">`
-          : `<h3>${esc(dataLonga(en.data))}</h3>`}
-        <span class="acoes">
-          <button class="botao pequeno alternar">${editando ? "Concluir" : "Editar"}</button>
-          ${editando ? `<button class="icone excluir-entrada" title="Excluir entrada">🗑</button>` : ""}
-        </span>
-      </header>
-      <div class="md-entrada"></div>`;
-    caixa.appendChild(art);
-    const md = art.querySelector(".md-entrada");
-    if (!editando) md.classList.add("so-leitura");
-    const { ta } = montarMarkdown(md, {
-      valor: en.corpo,
-      modo: editando ? modoEditor() : "visualizar",
-      placeholder: "O que você leu/fez hoje? Referências, achados, próximos passos…",
-      aoMudar: (v) => { en.corpo = v; en.atualizadoEm = agora(); tocarTexto(t); },
-    });
-    art.querySelector(".alternar").addEventListener("click", () => {
-      estado.entradaEditando = editando ? null : en.id;
-      renderizarEntradas(t);
-    });
-    if (editando) {
-      art.querySelector(".data-entrada").addEventListener("change", (e) => {
-        if (!e.target.value) return;
-        en.data = e.target.value;
-        tocarTexto(t);
-      });
-      art.querySelector(".excluir-entrada").addEventListener("click", () => {
-        if (!confirm(`Excluir a entrada de ${dataLonga(en.data)}?`)) return;
-        t.entradas = t.entradas.filter((x) => x.id !== en.id);
-        estado.entradaEditando = null;
-        tocarTexto(t);
-        renderizarEntradas(t);
-      });
-      requestAnimationFrame(() => ta.focus());
-    }
-  }
-}
-
-function entradaDeHoje(t) {
-  t.entradas ||= [];
-  const hoje = hojeISO();
-  let en = t.entradas.find((x) => x.data === hoje);
-  if (!en) {
-    en = { id: novoId("entrada"), data: hoje, corpo: "", criadoEm: agora(), atualizadoEm: agora() };
-    t.entradas.push(en);
-    tocarTexto(t);
-  }
-  estado.entradaEditando = en.id;
-  renderizarEntradas(t);
-  document.querySelector(`[data-entrada="${en.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-function novoTexto(tipo) {
-  const pastaId = estado.pastaAtual;
-  if (!pastaPorId(pastaId)) return;
-  const t = agora();
-  const texto = {
-    id: novoId("texto"), pastaId, tipo,
-    titulo: tipo === "diario" ? `Diário — ${new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}` : "",
-    corpo: "", entradas: tipo === "diario" ? [] : undefined,
-    criadoEm: t, atualizadoEm: t,
-  };
-  estado.dados.textos.push(texto);
-  limparBusca();
-  estado.textoAtual = texto.id;
-  estado.entradaEditando = null;
-  marcarAlterado();
-  renderizarTudo();
-  definirVista("editor");
-  if (tipo === "diario") entradaDeHoje(texto);
-  else $("#titulo-texto").focus();
-}
-
-function excluirTexto(t) {
-  if (!confirm(`Excluir “${t.titulo || "Sem título"}”? Isso não pode ser desfeito pelo site.`)) return;
-  estado.dados.textos = estado.dados.textos.filter((x) => x.id !== t.id);
-  estado.dados.removidos[t.id] = agora();
-  estado.textoAtual = null;
-  marcarAlterado();
-  renderizarTudo();
-  definirVista("lista");
-}
-
-function criarPasta(nome) {
-  const t = agora();
-  const p = { id: novoId("pasta"), nome, criadoEm: t, atualizadoEm: t };
-  estado.dados.pastas.push(p);
-  marcarAlterado();
-  return p;
-}
-
-function novaPasta() {
-  const nome = prompt("Nome da nova pasta:");
-  if (!nome?.trim()) return;
-  abrirPasta(criarPasta(nome.trim()).id);
-}
-
-function configurarApp() {
-  $("#lista-pastas").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-pasta]");
-    if (b) abrirPasta(b.dataset.pasta);
-  });
-  $("#grade-pastas").addEventListener("click", (e) => {
-    if (e.target.closest("#nova-pasta-inicio")) return novaPasta();
-    const b = e.target.closest("[data-pasta]");
-    if (b) abrirPasta(b.dataset.pasta);
-  });
-  $("#ir-inicio").addEventListener("click", abrirInicio);
-  $("#voltar-inicio").addEventListener("click", abrirInicio);
-
-  $("#lista-textos").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-texto]");
-    if (!b) return;
-    estado.textoAtual = b.dataset.texto;
-    estado.entradaEditando = null;
-    renderizarLista();
-    renderizarEditor();
-    definirVista("editor");
-    $("#painel-editor").scrollTop = 0;
-  });
-
-  // As duas caixas de busca (tela inicial e barra lateral) fazem a mesma coisa.
-  let tBusca = null;
-  for (const campo of [$("#busca"), $("#busca-inicio")]) {
-    campo.addEventListener("input", (e) => {
-      clearTimeout(tBusca);
-      tBusca = setTimeout(() => {
-        estado.busca = e.target.value.trim();
-        $("#busca").value = e.target.value;
-        $("#busca-inicio").value = e.target.value;
-        renderizarPastas();
-        renderizarLista();
-        if (estado.busca) {
-          definirVista("lista");
-          if (e.target.id === "busca-inicio") requestAnimationFrame(() => $("#busca").focus());
-        } else if (!estado.pastaAtual) {
-          definirVista("inicio");
-          requestAnimationFrame(() => $("#busca-inicio").focus());
-        }
-      }, 200);
-    });
-  }
-
-  $("#nova-pasta").addEventListener("click", novaPasta);
-
-  $("#renomear-pasta").addEventListener("click", () => {
-    const p = pastaPorId(estado.pastaAtual);
-    const nome = prompt("Novo nome da pasta:", p.nome);
-    if (!nome?.trim()) return;
-    p.nome = nome.trim();
-    p.atualizadoEm = agora();
-    marcarAlterado();
-    renderizarTudo();
-  });
-
-  $("#excluir-pasta").addEventListener("click", () => {
-    const p = pastaPorId(estado.pastaAtual);
-    const dentro = estado.dados.textos.filter((t) => t.pastaId === p.id);
-    const aviso = dentro.length ? ` e os ${dentro.length} texto(s) dentro dela` : "";
-    if (!confirm(`Excluir a pasta “${p.nome}”${aviso}?`)) return;
-    const t = agora();
-    estado.dados.pastas = estado.dados.pastas.filter((x) => x.id !== p.id);
-    estado.dados.textos = estado.dados.textos.filter((x) => x.pastaId !== p.id);
-    estado.dados.removidos[p.id] = t;
-    dentro.forEach((x) => { estado.dados.removidos[x.id] = t; });
-    marcarAlterado();
-    abrirInicio();
-  });
-
-  $("#novo-texto").addEventListener("click", () => novoTexto("texto"));
-  $("#novo-diario").addEventListener("click", () => novoTexto("diario"));
-  $("#salvar").addEventListener("click", () => salvar());
-  $("#abrir-pastas").addEventListener("click", () => {
-    definirVista($("#app").dataset.vista === "pastas" ? "lista" : "pastas");
-  });
-
-  document.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && estado.chave) {
-      e.preventDefault();
-      salvar();
-    }
-  });
-
-  window.addEventListener("beforeunload", (e) => {
-    if (estado.pendente || estado.salvando) { e.preventDefault(); e.returnValue = ""; }
-  });
-
-  configurarDialogoConfig();
-}
-
-// ---------------------------------------------------------------------------
 // Configurações
 // ---------------------------------------------------------------------------
-
-function baixarArquivo(nome, conteudo, tipo) {
-  const url = URL.createObjectURL(new Blob([conteudo], { type: tipo }));
-  const a = Object.assign(document.createElement("a"), { href: url, download: nome });
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 function msgConfig(texto, erro = false) {
   const el = $("#msg-config");
@@ -889,7 +1153,7 @@ function configurarDialogoConfig() {
   });
 
   $("#exportar").addEventListener("click", () => {
-    baixarArquivo(`caderno-backup-${hojeISO()}.json`, JSON.stringify({ formato: "caderno-backup", exportadoEm: agora(), ...estado.dados }, null, 2), "application/json");
+    baixarArquivo(`caderno-backup-${dataISO()}.json`, JSON.stringify({ formato: "caderno-backup", exportadoEm: agora(), ...estado.dados }, null, 2), "application/json");
   });
 
   $("#importar").addEventListener("change", async (e) => {
@@ -900,10 +1164,13 @@ function configurarDialogoConfig() {
       const b = JSON.parse(await arquivo.text());
       if (b.formato !== "caderno-backup" || !Array.isArray(b.pastas) || !Array.isArray(b.textos)) throw new Error("Este arquivo não é um backup do Caderno.");
       if (!confirm(`Juntar o backup (${b.pastas.length} pastas, ${b.textos.length} textos) ao caderno atual? Em textos repetidos, vale a versão editada por último.`)) return;
-      estado.dados = mesclarDados(estado.dados, { pastas: b.pastas, textos: b.textos, removidos: {} });
+      const importados = { pastas: b.pastas, textos: b.textos, removidos: {} };
+      migrar(importados);
+      estado.dados = mesclarDados(estado.dados, importados);
       marcarAlterado();
-      renderizarTudo();
-      msgConfig("Backup importado. Lembre de salvar.");
+      renderizarPaineis();
+      renderizarPrincipal();
+      msgConfig("Backup importado. Será enviado ao GitHub em instantes.");
     } catch (err) {
       msgConfig(err.message, true);
     }
