@@ -153,8 +153,12 @@ legend { font-weight: 600; font-size: .9rem; padding: 0 .3rem; }
   border-bottom: 1px solid var(--borda);
   background: var(--painel);
 }
-.marca { font-family: var(--serifa); font-weight: 600; font-size: 1.1rem; margin-right: auto; }
-.status { font-size: .85rem; color: var(--suave); max-width: 50vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.marca {
+  font-family: var(--serifa); font-weight: 600; font-size: 1.1rem; margin-right: auto; white-space: nowrap;
+  border: 0; background: none; cursor: pointer; padding: .25rem .4rem; border-radius: 8px;
+}
+.marca:hover { background: var(--painel-2); }
+.status { font-size: .85rem; color: var(--suave); min-width: 0; max-width: 50vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status.ok::before { content: "● "; color: var(--acento); }
 .status.pendente { color: var(--aviso); }
 .status.erro { color: var(--perigo); }
@@ -232,6 +236,47 @@ legend { font-weight: 600; font-size: .9rem; padding: 0 .3rem; }
 .modos button { border: 0; background: var(--painel); padding: .3rem .7rem; cursor: pointer; font-size: .85rem; }
 .modos button + button { border-left: 1px solid var(--borda); }
 .modos button.ativo { background: var(--acento); color: var(--acento-texto); }
+
+/* ---------- Tela inicial (pastas) ---------- */
+
+.inicio { grid-area: inicio; display: none; overflow-y: auto; padding: 2rem clamp(16px, 4vw, 3rem) 4rem; }
+#app[data-vista="inicio"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "topo" "inicio"; }
+#app[data-vista="inicio"] .inicio { display: block; }
+#app[data-vista="inicio"] .pastas,
+#app[data-vista="inicio"] .lista,
+#app[data-vista="inicio"] .editor { display: none !important; }
+#app[data-vista="inicio"] #abrir-pastas { display: none; }
+.inicio-topo { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; max-width: 1100px; margin: 0 auto 1.5rem; }
+.inicio-topo h1 { margin: 0; font-size: 2rem; }
+.inicio-topo input[type=search] { max-width: 320px; margin: 0; }
+.grade-pastas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 1.25rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+.cartao-pasta {
+  display: flex; flex-direction: column; align-items: flex-start; gap: .35rem;
+  min-height: 190px;
+  padding: 1.5rem;
+  text-align: left;
+  background: var(--painel);
+  border: 1px solid var(--borda);
+  border-radius: 16px;
+  box-shadow: var(--sombra);
+  cursor: pointer;
+  transition: transform .12s ease, border-color .12s ease;
+}
+.cartao-pasta:hover { transform: translateY(-2px); border-color: var(--acento); }
+.cartao-icone { font-size: 2.2rem; line-height: 1; margin-bottom: .4rem; }
+.cartao-nome { font: 600 1.35rem/1.25 var(--serifa); }
+.cartao-meta { font-size: .85rem; color: var(--suave); }
+.cartao-recentes { list-style: none; margin: .6rem 0 0; padding: .6rem 0 0; border-top: 1px solid var(--borda); width: 100%; display: grid; gap: .2rem; }
+.cartao-recentes li { font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cartao-pasta.nova { border-style: dashed; box-shadow: none; background: transparent; justify-content: center; align-items: center; color: var(--suave); }
+.cartao-pasta.nova .cartao-nome { font-size: 1.1rem; }
+.voltar-inicio { text-align: left; justify-content: flex-start; }
 
 /* ---------- Bloco Markdown ---------- */
 
@@ -324,9 +369,14 @@ dialog form label { width: 100%; }
 }
 
 @media (max-width: 800px) {
-  #app { grid-template-columns: 1fr; grid-template-areas: "topo" "conteudo"; }
+  #app { grid-template-columns: minmax(0, 1fr); grid-template-areas: "topo" "conteudo"; }
   .so-celular { display: inline-flex; }
   .pastas, .lista, .editor { grid-area: conteudo; border-right: 0; display: none; }
+  #app[data-vista="inicio"] { grid-template-areas: "topo" "inicio"; }
+  .inicio { padding-top: 1.25rem; }
+  .inicio-topo h1 { font-size: 1.6rem; }
+  .inicio-topo input[type=search] { max-width: none; }
+  .cartao-pasta { min-height: 0; }
   #app[data-vista="pastas"] .pastas { display: flex; }
   #app[data-vista="lista"] .lista { display: block; }
   #app[data-vista="editor"] .editor { display: block; }

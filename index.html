@@ -74,16 +74,25 @@
   </section>
 
   <!-- Aplicativo -->
-  <div id="app" class="tela" data-vista="lista" hidden>
+  <div id="app" class="tela" data-vista="inicio" hidden>
     <header class="topo">
       <button class="icone so-celular" id="abrir-pastas" title="Pastas">☰</button>
-      <span class="marca">📓 Caderno</span>
+      <button class="marca" id="ir-inicio" title="Voltar às pastas">📓 Caderno</button>
       <span class="status" id="status"></span>
       <button class="botao pequeno" id="salvar" title="Salvar agora (Ctrl+S)">Salvar</button>
       <button class="icone" id="abrir-config" title="Configurações">⚙</button>
     </header>
 
+    <section class="inicio" id="painel-inicio">
+      <div class="inicio-topo">
+        <h1>Minhas pastas</h1>
+        <input type="search" id="busca-inicio" placeholder="Buscar em tudo…">
+      </div>
+      <div class="grade-pastas" id="grade-pastas"></div>
+    </section>
+
     <aside class="pastas" id="painel-pastas">
+      <button class="botao fantasma voltar-inicio" id="voltar-inicio">← Todas as pastas</button>
       <input type="search" id="busca" placeholder="Buscar em tudo…">
       <nav id="lista-pastas"></nav>
       <button class="botao fantasma" id="nova-pasta">+ Nova pasta</button>

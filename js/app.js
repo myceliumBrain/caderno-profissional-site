@@ -27,7 +27,7 @@ const estado = {
   salvando: false,
   salvarDeNovo: false,
   erro: "",
-  pastaAtual: "todas",
+  pastaAtual: null,      // null = tela inicial com as pastas
   textoAtual: null,
   busca: "",
   entradaEditando: null,
@@ -421,7 +421,7 @@ function textosVisiveis() {
   if (estado.busca) {
     const q = semAcento(estado.busca);
     lista = lista.filter((t) => semAcento(textoCompleto(t)).includes(q));
-  } else if (estado.pastaAtual !== "todas") {
+  } else {
     lista = lista.filter((t) => t.pastaId === estado.pastaAtual);
   }
   return [...lista].sort((a, b) => (b.atualizadoEm || "").localeCompare(a.atualizadoEm || ""));
@@ -432,8 +432,10 @@ function definirVista(vista) {
 }
 
 function renderizarTudo() {
-  if (estado.pastaAtual !== "todas" && !pastaPorId(estado.pastaAtual)) estado.pastaAtual = "todas";
+  if (estado.pastaAtual && !pastaPorId(estado.pastaAtual)) estado.pastaAtual = null;
   if (estado.textoAtual && !textoPorId(estado.textoAtual)) estado.textoAtual = null;
+  if (!estado.pastaAtual && !estado.busca) definirVista("inicio");
+  renderizarInicio();
   renderizarPastas();
   renderizarLista();
   renderizarEditor();
@@ -445,15 +447,58 @@ function renderizarPastas() {
     <button class="pasta ${estado.pastaAtual === id && !estado.busca ? "ativa" : ""}" data-pasta="${esc(id)}">
       <span>${esc(nome)}</span><span class="contagem">${n}</span>
     </button>`;
-  $("#lista-pastas").innerHTML =
-    item("todas", "🕘 Todos os textos", estado.dados.textos.length) +
-    estado.dados.pastas.map((p) => item(p.id, `📁 ${p.nome}`, contar(p.id))).join("");
+  $("#lista-pastas").innerHTML = estado.dados.pastas.map((p) => item(p.id, `📁 ${p.nome}`, contar(p.id))).join("");
+}
+
+// Tela inicial: uma pasta por cartão, com os textos editados por último.
+function renderizarInicio() {
+  const cartoes = estado.dados.pastas.map((p) => {
+    const textos = estado.dados.textos
+      .filter((t) => t.pastaId === p.id)
+      .sort((a, b) => (b.atualizadoEm || "").localeCompare(a.atualizadoEm || ""));
+    const recentes = textos.slice(0, 3).map((t) => `<li>${t.tipo === "diario" ? "📅 " : ""}${esc(t.titulo || "Sem título")}</li>`).join("");
+    return `
+      <button class="cartao-pasta" data-pasta="${esc(p.id)}">
+        <span class="cartao-icone">📁</span>
+        <span class="cartao-nome">${esc(p.nome)}</span>
+        <span class="cartao-meta">${textos.length} ${textos.length === 1 ? "texto" : "textos"}${textos[0] ? ` · editado ${esc(quando(textos[0].atualizadoEm))}` : ""}</span>
+        ${recentes ? `<ul class="cartao-recentes">${recentes}</ul>` : ""}
+      </button>`;
+  }).join("");
+  $("#grade-pastas").innerHTML = cartoes + `
+    <button class="cartao-pasta nova" id="nova-pasta-inicio">
+      <span class="cartao-icone">＋</span>
+      <span class="cartao-nome">Nova pasta</span>
+    </button>`;
+}
+
+function limparBusca() {
+  estado.busca = "";
+  $("#busca").value = "";
+  $("#busca-inicio").value = "";
+}
+
+function abrirInicio() {
+  estado.pastaAtual = null;
+  estado.textoAtual = null;
+  limparBusca();
+  renderizarTudo();
+}
+
+function abrirPasta(id) {
+  estado.pastaAtual = id;
+  estado.textoAtual = null;
+  estado.entradaEditando = null;
+  limparBusca();
+  renderizarTudo();
+  definirVista("lista");
 }
 
 function renderizarLista() {
   const pasta = pastaPorId(estado.pastaAtual);
-  $("#titulo-pasta").textContent = estado.busca ? `Busca: “${estado.busca}”` : pasta ? pasta.nome : "Todos os textos";
+  $("#titulo-pasta").textContent = estado.busca ? `Busca: “${estado.busca}”` : pasta ? pasta.nome : "";
   $("#menu-pasta").hidden = !pasta || !!estado.busca;
+  document.querySelector(".acoes.novo").hidden = !pasta || !!estado.busca;
   const lista = textosVisiveis();
   if (!lista.length) {
     $("#lista-textos").innerHTML = `<li class="vazio">${estado.busca ? "Nada encontrado." : "Nenhum texto aqui ainda."}</li>`;
@@ -462,7 +507,7 @@ function renderizarLista() {
   $("#lista-textos").innerHTML = lista.map((t) => {
     const trecho = (t.tipo === "diario" ? (t.entradas?.[0]?.corpo ?? t.corpo) : t.corpo) || "";
     const resumo = trecho.replace(/[#*_>`\-\[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110);
-    const nomePasta = estado.pastaAtual === "todas" || estado.busca ? pastaPorId(t.pastaId)?.nome : "";
+    const nomePasta = estado.busca ? pastaPorId(t.pastaId)?.nome : "";
     return `
       <li>
         <button class="item ${t.id === estado.textoAtual ? "ativo" : ""}" data-texto="${esc(t.id)}">
@@ -620,11 +665,8 @@ function entradaDeHoje(t) {
 }
 
 function novoTexto(tipo) {
-  let pastaId = estado.pastaAtual;
-  if (pastaId === "todas" || !pastaPorId(pastaId)) {
-    if (!estado.dados.pastas.length) criarPasta("Geral");
-    pastaId = estado.dados.pastas[0].id;
-  }
+  const pastaId = estado.pastaAtual;
+  if (!pastaPorId(pastaId)) return;
   const t = agora();
   const texto = {
     id: novoId("texto"), pastaId, tipo,
@@ -633,9 +675,7 @@ function novoTexto(tipo) {
     criadoEm: t, atualizadoEm: t,
   };
   estado.dados.textos.push(texto);
-  estado.busca = "";
-  $("#busca").value = "";
-  estado.pastaAtual = pastaId;
+  limparBusca();
   estado.textoAtual = texto.id;
   estado.entradaEditando = null;
   marcarAlterado();
@@ -663,17 +703,24 @@ function criarPasta(nome) {
   return p;
 }
 
+function novaPasta() {
+  const nome = prompt("Nome da nova pasta:");
+  if (!nome?.trim()) return;
+  abrirPasta(criarPasta(nome.trim()).id);
+}
+
 function configurarApp() {
   $("#lista-pastas").addEventListener("click", (e) => {
     const b = e.target.closest("[data-pasta]");
-    if (!b) return;
-    estado.pastaAtual = b.dataset.pasta;
-    estado.busca = "";
-    $("#busca").value = "";
-    renderizarPastas();
-    renderizarLista();
-    definirVista("lista");
+    if (b) abrirPasta(b.dataset.pasta);
   });
+  $("#grade-pastas").addEventListener("click", (e) => {
+    if (e.target.closest("#nova-pasta-inicio")) return novaPasta();
+    const b = e.target.closest("[data-pasta]");
+    if (b) abrirPasta(b.dataset.pasta);
+  });
+  $("#ir-inicio").addEventListener("click", abrirInicio);
+  $("#voltar-inicio").addEventListener("click", abrirInicio);
 
   $("#lista-textos").addEventListener("click", (e) => {
     const b = e.target.closest("[data-texto]");
@@ -686,25 +733,29 @@ function configurarApp() {
     $("#painel-editor").scrollTop = 0;
   });
 
+  // As duas caixas de busca (tela inicial e barra lateral) fazem a mesma coisa.
   let tBusca = null;
-  $("#busca").addEventListener("input", (e) => {
-    clearTimeout(tBusca);
-    tBusca = setTimeout(() => {
-      estado.busca = e.target.value.trim();
-      renderizarPastas();
-      renderizarLista();
-      if (estado.busca) definirVista("lista");
-    }, 200);
-  });
+  for (const campo of [$("#busca"), $("#busca-inicio")]) {
+    campo.addEventListener("input", (e) => {
+      clearTimeout(tBusca);
+      tBusca = setTimeout(() => {
+        estado.busca = e.target.value.trim();
+        $("#busca").value = e.target.value;
+        $("#busca-inicio").value = e.target.value;
+        renderizarPastas();
+        renderizarLista();
+        if (estado.busca) {
+          definirVista("lista");
+          if (e.target.id === "busca-inicio") requestAnimationFrame(() => $("#busca").focus());
+        } else if (!estado.pastaAtual) {
+          definirVista("inicio");
+          requestAnimationFrame(() => $("#busca-inicio").focus());
+        }
+      }, 200);
+    });
+  }
 
-  $("#nova-pasta").addEventListener("click", () => {
-    const nome = prompt("Nome da nova pasta:");
-    if (!nome?.trim()) return;
-    const p = criarPasta(nome.trim());
-    estado.pastaAtual = p.id;
-    renderizarTudo();
-    definirVista("lista");
-  });
+  $("#nova-pasta").addEventListener("click", novaPasta);
 
   $("#renomear-pasta").addEventListener("click", () => {
     const p = pastaPorId(estado.pastaAtual);
@@ -726,9 +777,8 @@ function configurarApp() {
     estado.dados.textos = estado.dados.textos.filter((x) => x.pastaId !== p.id);
     estado.dados.removidos[p.id] = t;
     dentro.forEach((x) => { estado.dados.removidos[x.id] = t; });
-    estado.pastaAtual = "todas";
     marcarAlterado();
-    renderizarTudo();
+    abrirInicio();
   });
 
   $("#novo-texto").addEventListener("click", () => novoTexto("texto"));
