@@ -42,7 +42,7 @@ const estado = {
   shaCaderno: null,
   chave: null,
   github: null,
-  dados: null,          // { pastas, textos, removidos }
+  dados: null,          // { pastas, textos, lembretes, removidos }
   pendente: false,
   salvando: false,
   salvarDeNovo: false,
@@ -106,6 +106,7 @@ function dadosIniciais() {
       { id: novoId("pasta"), nome: "Revisão de literatura", criadoEm: t, atualizadoEm: t },
     ],
     textos: [],
+    lembretes: [],
     removidos: {},
   };
 }
@@ -117,6 +118,7 @@ function migrar(d) {
   d.pastas ||= [];
   d.textos ||= [];
   d.removidos ||= {};
+  d.lembretes ||= [];
   for (const t of d.textos) {
     if (t.formato !== "html") {
       t.corpo = markdownParaHtml(t.corpo || "");
@@ -326,7 +328,29 @@ function metaDoTexto(t, comPasta = false) {
   return partes.join(" · ");
 }
 
-const icone = (t) => (t.tipo === "diario" ? "📅" : "📄");
+const icone = (t) => (t.tipo === "diario" ? "📔" : "📄");
+
+// Setinha que abre "Editar" e "Lixeira".
+function menuAcoes(editar, lixeira, extra = "") {
+  return `
+    <div class="menu-caixa menu-acoes">
+      <button class="seta" type="button" data-acao="abrir-menu" title="Opções" aria-label="Opções" aria-expanded="false" ${extra}>▾</button>
+      <div class="menu-barra direita menu-flutuante" hidden>
+        <button class="menu-item" type="button" data-acao="${editar}" ${extra}>Editar</button>
+        <button class="menu-item perigo" type="button" data-acao="${lixeira}" ${extra}>Lixeira</button>
+      </div>
+    </div>`;
+}
+
+function fecharMenus(exceto = null) {
+  document.querySelectorAll("#principal .menu-flutuante").forEach((m) => {
+    if (m === exceto) return;
+    m.hidden = true;
+    m.parentElement.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
+  });
+}
+
+const AJUDA_TIPOS = "Texto: um documento único (ex.: um protocolo).\nDiário: um registro em entradas com data e hora (ex.: a revisão de literatura feita um pouco por dia).";
 
 // ---------------------------------------------------------------------------
 // Navegação
@@ -501,7 +525,8 @@ function paginaInicio(el) {
   }).join("");
   const n = totalNaLixeira();
   el.innerHTML = `
-    <div class="pagina">
+    <div class="pagina pagina-inicio">
+      <div class="inicio-pastas">
       <div class="pagina-topo">
         <h1>Minhas pastas</h1>
         <input type="search" id="busca-inicio" placeholder="Buscar em tudo…" value="${esc(estado.busca)}">
@@ -516,11 +541,90 @@ function paginaInicio(el) {
           <span class="cartao-meta">${n ? plural(n, "item", "itens") : "vazia"}</span>
         </button>
       </div>
+      </div>
+      <aside class="lembretes" id="lembretes" aria-label="Lembretes"></aside>
     </div>`;
+  montarLembretes(el.querySelector("#lembretes"));
   el.querySelector("#busca-inicio").addEventListener("input", (e) => {
     clearTimeout(timerBusca);
     timerBusca = setTimeout(() => { buscar(e.target.value); requestAnimationFrame(() => $("#busca").focus()); }, 250);
   });
+}
+
+// ── Lembretes (página inicial) ──
+// Pendentes ficam no topo; concluídos vão para "Concluídos", onde podem
+// voltar ou ser excluídos de vez (os únicos itens que o caderno apaga).
+
+function montarLembretes(caixa) {
+  const pendentes = estado.dados.lembretes.filter((l) => !l.concluidoEm)
+    .sort((a, b) => (a.criadoEm || "").localeCompare(b.criadoEm || ""));
+  const concluidos = estado.dados.lembretes.filter((l) => l.concluidoEm)
+    .sort((a, b) => b.concluidoEm.localeCompare(a.concluidoEm));
+  const abertos = lerLS("caderno.concluidos") === "1";
+  caixa.innerHTML = `
+    <div class="lembretes-topo">
+      <h2>🔔 Lembretes</h2>
+      ${pendentes.length ? `<span class="selo-contagem">${pendentes.length}</span>` : ""}
+    </div>
+    <form class="novo-lembrete" autocomplete="off">
+      <input name="texto" maxlength="300" placeholder="Novo lembrete…" aria-label="Novo lembrete">
+      <button class="botao primario pequeno" type="submit" title="Adicionar">+</button>
+    </form>
+    ${pendentes.length ? `<ul class="lista-lembretes">${pendentes.map((l) => `
+      <li data-lembrete="${esc(l.id)}">
+        <label class="lembrete">
+          <input type="checkbox" data-concluir="${esc(l.id)}" title="Marcar como concluído">
+          <span class="lembrete-corpo">
+            <span class="lembrete-texto">${esc(l.texto)}</span>
+            <span class="lembrete-meta">${esc(quando(l.criadoEm))}</span>
+          </span>
+        </label>
+      </li>`).join("")}</ul>` : `<p class="lembretes-vazio">Nada pendente. 🎉</p>`}
+    ${concluidos.length ? `
+    <details class="concluidos" ${abertos ? "open" : ""}>
+      <summary>Concluídos (${concluidos.length})</summary>
+      <ul class="lista-lembretes">${concluidos.map((l) => `
+        <li class="feito" data-lembrete="${esc(l.id)}">
+          <label class="lembrete">
+            <input type="checkbox" checked data-reabrir="${esc(l.id)}" title="Voltar para pendentes">
+            <span class="lembrete-corpo">
+              <span class="lembrete-texto">${esc(l.texto)}</span>
+              <span class="lembrete-meta">concluído ${esc(quando(l.concluidoEm))}</span>
+            </span>
+          </label>
+          <button class="excluir-lembrete" type="button" data-excluir="${esc(l.id)}" title="Excluir de vez">Excluir</button>
+        </li>`).join("")}</ul>
+    </details>` : ""}`;
+
+  const form = caixa.querySelector(".novo-lembrete");
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const texto = form.texto.value.trim();
+    if (!texto) return;
+    const t = agora();
+    estado.dados.lembretes.push({ id: novoId("lembrete"), texto, criadoEm: t, atualizadoEm: t, concluidoEm: null });
+    marcarAlterado();
+    montarLembretes(caixa);
+    caixa.querySelector(".novo-lembrete input").focus();
+  });
+  caixa.querySelector("details.concluidos")?.addEventListener("toggle", (e) => gravarLS("caderno.concluidos", e.target.open ? "1" : "0"));
+  caixa.onchange = (e) => {
+    const d = e.target.dataset;
+    const l = estado.dados.lembretes.find((x) => x.id === (d.concluir || d.reabrir));
+    if (!l) return;
+    l.concluidoEm = d.concluir ? agora() : null;
+    l.atualizadoEm = agora();
+    marcarAlterado();
+    setTimeout(() => montarLembretes(caixa), d.concluir ? 250 : 0); // deixa ver o "check" antes de mover
+  };
+  caixa.querySelectorAll("[data-excluir]").forEach((b) => b.addEventListener("click", () => {
+    const l = estado.dados.lembretes.find((x) => x.id === b.dataset.excluir);
+    if (!l || !confirm(`Excluir de vez o lembrete “${l.texto}”?`)) return;
+    estado.dados.lembretes = estado.dados.lembretes.filter((x) => x.id !== l.id);
+    estado.dados.removidos[l.id] = agora();
+    marcarAlterado();
+    montarLembretes(caixa);
+  }));
 }
 
 function paginaPasta(el) {
@@ -530,17 +634,13 @@ function paginaPasta(el) {
   el.innerHTML = `
     <div class="pagina">
       <div class="pagina-topo">
-        <h1>📁 ${esc(p.nome)}</h1>
-        <div class="acoes">
-          <button class="botao pequeno" data-acao="renomear-pasta">Renomear</button>
-          <button class="botao-lixeira" data-acao="pasta-lixeira">Enviar para a lixeira</button>
-        </div>
+        <div class="titulo-pasta"><h1>📁 ${esc(p.nome)}</h1>${menuAcoes("renomear-pasta", "pasta-lixeira")}</div>
       </div>
       <div class="acoes novo">
         <button class="botao primario" data-acao="novo-texto">+ Novo texto</button>
         <button class="botao" data-acao="novo-diario">+ Novo diário</button>
+        <span class="ajuda" tabindex="0" role="note" aria-label="${esc(AJUDA_TIPOS)}" data-dica="${esc(AJUDA_TIPOS)}">?</span>
       </div>
-      <p class="dica"><strong>Texto</strong>: um documento único (ex.: um protocolo). <strong>Diário</strong>: um registro em entradas com data e hora (ex.: a revisão de literatura feita um pouco por dia).</p>
       ${textos.length ? `<ul class="lista-grande">${textos.map((t) => itemGrande(t)).join("")}</ul>` : `<p class="vazio">Nenhum texto nesta pasta ainda.</p>`}
     </div>`;
 }
@@ -578,7 +678,7 @@ function paginaLixeira(el) {
         `da pasta ${esc(pastaPorId(t.pastaId)?.nome || "?")} · enviado ${esc(quando(t.naLixeira))}`,
         `<button class="botao pequeno" data-texto="${esc(t.id)}">Ver</button><button class="botao pequeno" data-restaurar-texto="${esc(t.id)}">Restaurar</button>`)))}
       ${secao("Entradas de diário", l.entradas.map(({ texto, entrada }) => linha(
-        `📅 Entrada de ${esc(dataCurta(entrada.data))}, ${esc(entrada.hora)}`,
+        `📔 Entrada de ${esc(dataCurta(entrada.data))}, ${esc(entrada.hora)}`,
         `do diário “${esc(texto.titulo || "Sem título")}” · enviada ${esc(quando(entrada.naLixeira))}${textoDeHtml(entrada.corpo) ? ` · “${esc(textoDeHtml(entrada.corpo).slice(0, 60))}…”` : ""}`,
         `<button class="botao pequeno" data-restaurar-entrada="${esc(entrada.id)}" data-diario="${esc(texto.id)}">Restaurar</button>`)))}
     </div>`;
@@ -612,7 +712,7 @@ function paginaTexto(el) {
         <span class="espaco"></span>
         <div class="menu-caixa">
           <button class="botao pequeno" data-acao="menu-exportar">Exportar ▾</button>
-          <div class="menu-barra direita" id="menu-exportar" hidden>
+          <div class="menu-barra direita menu-flutuante" id="menu-exportar" hidden>
             <button class="menu-item" data-exportar="pdf">PDF</button>
             <button class="menu-item" data-exportar="docx">Word (.docx)</button>
             <button class="menu-item" data-exportar="txt">Texto (.txt)</button>
@@ -620,28 +720,31 @@ function paginaTexto(el) {
         </div>
         ${naLixeira
           ? `<button class="botao pequeno primario" data-restaurar-texto="${esc(t.id)}">Restaurar</button>`
-          : `<button class="botao-lixeira" data-acao="texto-lixeira">Enviar para a lixeira</button>`}
+          : menuAcoes("editar-texto", "texto-lixeira")}
       </div>
       ${naLixeira ? `<p class="aviso-lixeira">Este texto está na lixeira desde ${esc(quando(t.naLixeira))}. Restaure para voltar a editar.</p>` : ""}
       ${escrever ? `<div id="barra-formatacao"></div>` : ""}
       <div class="folha">
         <input class="titulo-texto documento" id="titulo-texto" value="${esc(t.titulo)}" placeholder="Título" ${escrever ? "" : "readonly"}>
-        <div class="meta-texto">
+        <div class="meta-texto" ${escrever ? "" : "hidden"}>
           <label>📁 <select id="mover-texto" ${naLixeira ? "disabled" : ""}>${opcoesPasta}</select></label>
-          <span>${t.tipo === "diario" ? "📅 Diário" : "📄 Texto"}</span>
+          <span>${t.tipo === "diario" ? "📔 Diário" : "📄 Texto"}</span>
           <span>criado ${esc(quando(t.criadoEm))}</span>
           <span>editado ${esc(quando(t.atualizadoEm))}</span>
         </div>
-        ${t.tipo === "diario" ? `
+        ${t.tipo === "diario" ? (escrever ? `
           <details class="descricao" ${t.corpo ? "open" : ""}>
-            <summary>Sobre este diário <span class="suave">(objetivo, perguntas, palavras-chave)</span></summary>
+            <summary>Sobre</summary>
             <div id="corpo-texto"></div>
           </details>
           <div class="diario-topo">
-            ${naLixeira ? "" : `<button class="botao primario" data-acao="nova-entrada">+ Nova entrada</button>`}
-            <span class="dica">Cada entrada guarda a data e a hora em que foi escrita. A mais recente fica no topo.</span>
+            <button class="botao primario" data-acao="nova-entrada">+ Nova entrada</button>
           </div>
-          <div class="linha-do-tempo" id="entradas"></div>`
+          <div class="linha-do-tempo" id="entradas"></div>` : `
+          <div class="rt-leitura">
+            <div class="sobre" id="corpo-texto"></div>
+            <div id="entradas"></div>
+          </div>`)
         : `<div id="corpo-texto"></div>`}
       </div>
     </div>`;
@@ -664,14 +767,43 @@ function paginaTexto(el) {
     aoMudar: (html) => { t.corpo = html; tocarTexto(t); },
   });
 
-  if (t.tipo === "diario") renderizarEntradas(t, escrever && !naLixeira);
+  if (t.tipo === "diario") {
+    if (escrever) renderizarEntradas(t);
+    else renderizarLeitura(t);
+  }
 }
 
-function renderizarEntradas(t, escrever) {
+// Diário no modo Ler: igual ao PDF (ordem cronológica, título por entrada).
+function renderizarLeitura(t) {
+  if (!t.corpo) $("#corpo-texto").hidden = true;
+  const caixa = $("#entradas");
+  const entradas = entradasAtivas(t).reverse();
+  if (!entradas.length) {
+    caixa.innerHTML = `<p class="vazio">Nenhuma entrada ainda.</p>`;
+    return;
+  }
+  caixa.innerHTML = "";
+  entradas.forEach((en, i) => {
+    const h = document.createElement("h2");
+    h.className = "titulo-entrada";
+    h.textContent = `Entrada nº ${i + 1} — ${dataLonga(en.data)}, ${en.hora}`;
+    const corpo = document.createElement("div");
+    caixa.append(h, corpo);
+    montarEditor(corpo, {
+      html: en.corpo,
+      editavel: false,
+      placeholder: "",
+      aoMudar: (html) => { en.corpo = html; en.atualizadoEm = agora(); tocarTexto(t); },
+    });
+  });
+}
+
+function renderizarEntradas(t) {
+  const escrever = true;
   const caixa = $("#entradas");
   const entradas = entradasAtivas(t);
   if (!entradas.length) {
-    caixa.innerHTML = `<p class="vazio">Nenhuma entrada ainda.${escrever ? " Clique em “+ Nova entrada” para registrar a primeira." : ""}</p>`;
+    caixa.innerHTML = `<p class="vazio">Nenhuma entrada ainda. Clique em “+ Nova entrada” para registrar a primeira.</p>`;
     return;
   }
   caixa.innerHTML = "";
@@ -689,7 +821,7 @@ function renderizarEntradas(t, escrever) {
           : `<span class="entrada-quando"><strong>${esc(dataLonga(en.data))}</strong> · ${esc(en.hora)}</span>`}
         ${i === 0 ? `<span class="selo">mais recente</span>` : ""}
         <span class="espaco"></span>
-        ${escrever ? `<button class="botao-lixeira" data-acao="entrada-lixeira">Enviar para a lixeira</button>` : ""}
+        ${menuAcoes("entrada-editar", "entrada-lixeira", `data-entrada-id="${esc(en.id)}"`)}
       </div>
       <div class="entrada-texto"></div>`;
     caixa.appendChild(art);
@@ -700,23 +832,44 @@ function renderizarEntradas(t, escrever) {
       aoMudar: (html) => { en.corpo = html; en.atualizadoEm = agora(); tocarTexto(t); },
     });
     if (escrever) {
-      const reordenar = () => { tocarTexto(t); renderizarEntradas(t, true); };
+      const reordenar = () => { tocarTexto(t); renderizarEntradas(t); };
       art.querySelector(".entrada-data").addEventListener("change", (e) => { if (e.target.value) { en.data = e.target.value; en.atualizadoEm = agora(); reordenar(); } });
       art.querySelector(".entrada-hora").addEventListener("change", (e) => { if (e.target.value) { en.hora = e.target.value; en.atualizadoEm = agora(); reordenar(); } });
+      art.querySelector("[data-acao='entrada-editar']").addEventListener("click", () => {
+        const corpo = art.querySelector(".entrada-texto");
+        corpo.focus();
+        const r = document.createRange();
+        r.selectNodeContents(corpo);
+        r.collapse(false);
+        getSelection().removeAllRanges();
+        getSelection().addRange(r);
+      });
       art.querySelector("[data-acao='entrada-lixeira']").addEventListener("click", () => {
         en.naLixeira = agora();
         en.atualizadoEm = agora();
         tocarTexto(t);
-        renderizarEntradas(t, true);
+        renderizarEntradas(t);
         avisar(`Entrada de ${dataCurta(en.data)}, ${en.hora} enviada para a lixeira.`, () => {
           en.naLixeira = null;
           en.atualizadoEm = agora();
           tocarTexto(t);
-          if (estado.textoAtual === t.id) renderizarEntradas(t, estado.modo === "escrever");
+          if (estado.textoAtual === t.id) renderizarPrincipal();
         });
       });
     }
   });
+}
+
+function editarTexto() {
+  if (estado.modo !== "escrever") {
+    estado.modo = "escrever";
+    gravarLS("caderno.modo", "escrever");
+    const rolagem = $("#principal").scrollTop;
+    renderizarPrincipal();
+    $("#principal").scrollTop = rolagem;
+  }
+  const t = textoPorId(estado.textoAtual);
+  (t?.tipo === "diario" || !t?.titulo ? $("#titulo-texto") : $("#corpo-texto"))?.focus();
 }
 
 function novaEntrada(t) {
@@ -872,16 +1025,21 @@ function configurarApp() {
   // Cliques na área principal (o conteúdo é redesenhado a cada página).
   $("#principal").addEventListener("click", (e) => {
     const alvo = e.target.closest("button, [data-pasta], [data-texto]");
-    if (!alvo) {
-      $("#menu-exportar")?.setAttribute("hidden", "");
+    if (alvo?.dataset.acao === "abrir-menu" || alvo?.dataset.acao === "menu-exportar") {
+      const menu = alvo.parentElement.querySelector(".menu-flutuante");
+      fecharMenus(menu);
+      menu.hidden = !menu.hidden;
+      alvo.setAttribute("aria-expanded", String(!menu.hidden));
       return;
     }
+    fecharMenus();
+    if (!alvo) return;
     const d = alvo.dataset;
     const t = textoPorId(estado.textoAtual);
     if (d.restaurarPasta) return restaurarPasta(d.restaurarPasta);
     if (d.restaurarTexto) return restaurarTexto(d.restaurarTexto);
     if (d.restaurarEntrada) return restaurarEntrada(d.diario, d.restaurarEntrada);
-    if (d.exportar) { $("#menu-exportar").hidden = true; return exportar(d.exportar); }
+    if (d.exportar) return exportar(d.exportar);
     if (d.modo) {
       estado.modo = d.modo;
       gravarLS("caderno.modo", d.modo);
@@ -899,7 +1057,7 @@ function configurarApp() {
       case "nova-entrada": return novaEntrada(t);
       case "texto-lixeira": return textoParaLixeira(t);
       case "pasta-lixeira": return pastaParaLixeira(pastaPorId(estado.pastaAtual));
-      case "menu-exportar": { const m = $("#menu-exportar"); m.hidden = !m.hidden; return; }
+      case "editar-texto": return editarTexto();
       case "renomear-pasta": {
         const p = pastaPorId(estado.pastaAtual);
         const nome = prompt("Novo nome da pasta:", p.nome);
@@ -925,7 +1083,7 @@ function configurarApp() {
       e.preventDefault();
       salvar();
     }
-    if (e.key === "Escape") { fecharGaveta(); $("#menu-exportar")?.setAttribute("hidden", ""); }
+    if (e.key === "Escape") { fecharGaveta(); fecharMenus(); }
   });
 
   // Nunca perder nada: cópia local imediata ao sair/esconder a aba,
@@ -1086,8 +1244,20 @@ function msgConfig(texto, erro = false) {
   el.hidden = !texto;
 }
 
+function aplicarTema(tema) {
+  document.documentElement.dataset.tema = tema;
+  gravarLS("caderno.tema", tema);
+  document.querySelectorAll("#escolher-tema [data-tema]").forEach((b) => b.classList.toggle("ativo", b.dataset.tema === tema));
+}
+
 function configurarDialogoConfig() {
   const dlg = $("#dialogo-config");
+
+  aplicarTema(document.documentElement.dataset.tema === "escuro" ? "escuro" : "claro");
+  $("#escolher-tema").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tema]");
+    if (b) aplicarTema(b.dataset.tema);
+  });
 
   $("#abrir-config").addEventListener("click", () => {
     $("#info-repo").textContent = `Salvando em ${CONFIG.owner}/${CONFIG.repo} (branch ${CONFIG.branch}).`;
@@ -1164,7 +1334,7 @@ function configurarDialogoConfig() {
       const b = JSON.parse(await arquivo.text());
       if (b.formato !== "caderno-backup" || !Array.isArray(b.pastas) || !Array.isArray(b.textos)) throw new Error("Este arquivo não é um backup do Caderno.");
       if (!confirm(`Juntar o backup (${b.pastas.length} pastas, ${b.textos.length} textos) ao caderno atual? Em textos repetidos, vale a versão editada por último.`)) return;
-      const importados = { pastas: b.pastas, textos: b.textos, removidos: {} };
+      const importados = { pastas: b.pastas, textos: b.textos, lembretes: b.lembretes || [], removidos: {} };
       migrar(importados);
       estado.dados = mesclarDados(estado.dados, importados);
       marcarAlterado();

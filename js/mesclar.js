@@ -1,5 +1,5 @@
 // Junta duas versões do caderno (ex.: editou no celular e no computador).
-// Regra: por item (pasta/texto), vence a versão com "atualizadoEm" mais recente;
+// Regra: por item (pasta/texto/lembrete), vence a versão com "atualizadoEm" mais recente;
 // itens excluídos ficam registrados em "removidos" para não "ressuscitarem".
 
 function mesclarListas(locais, remotos, removidos) {
@@ -23,5 +23,6 @@ export function mesclarDados(local, remoto) {
     removidos,
     pastas: mesclarListas(local.pastas || [], remoto.pastas || [], removidos),
     textos: mesclarListas(local.textos || [], remoto.textos || [], removidos),
+    lembretes: mesclarListas(local.lembretes || [], remoto.lembretes || [], removidos),
   };
 }

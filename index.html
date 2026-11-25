@@ -6,6 +6,7 @@
   <meta name="robots" content="noindex, nofollow">
   <title>Caderno</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📓</text></svg>">
+  <script>try { document.documentElement.dataset.tema = localStorage.getItem("caderno.tema") === "escuro" ? "escuro" : "claro"; } catch (e) {}</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap">
@@ -126,6 +127,13 @@
       <h2>Configurações</h2>
       <button class="icone" value="fechar" title="Fechar">✕</button>
     </form>
+
+    <section>
+      <h3>Aparência</h3>
+      <span class="modos" role="group" aria-label="Tema" id="escolher-tema">
+        <button type="button" data-tema="claro">☀ Claro</button><button type="button" data-tema="escuro">☾ Escuro</button>
+      </span>
+    </section>
 
     <section>
       <h3>Trocar senha</h3>

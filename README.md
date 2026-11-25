@@ -24,8 +24,11 @@ recuperação), os arquivos são ilegíveis.
   sublinhado, subtítulo, texto pequeno, sub/sobrescrito, listas, lista de
   **passos** com caixinha (marcável também no modo Ler, útil na bancada),
   tabelas, alinhamento e limpar formatação. Textos em Times New Roman; a
-  interface em Lexend. Ao colar de Word/PDF/sites, a formatação estranha é limpa.
+  interface em Lexend. Tema claro ou escuro (⚙ → Aparência). Ao colar de Word/PDF/sites, a formatação estranha é limpa.
 - **Painéis laterais recolhíveis**: pastas e lista de textos (esta começa recolhida).
+- **Lembretes** na página inicial, ao lado das pastas: coisas pontuais para
+  hoje ou amanhã. Marcar como feito leva para “Concluídos”; só ali dá para
+  excluir de vez (os lembretes são a única coisa que o caderno apaga).
 - **Lixeira**: nada é apagado. Pastas, textos e entradas vão para a Lixeira
   (depois de “Nova pasta”) e podem ser restaurados a qualquer momento.
 - **Exportar** cada texto (o diário inteiro, com as entradas) em PDF, Word
@@ -88,7 +91,7 @@ Para usar outro repositório, mude `js/config.js`.
 
 ```
 index.html            telas (criação, código, login, recuperação, app)
-css/style.css         visual (tema claro, Lexend + Times New Roman, celular)
+css/style.css         visual (tema claro ou escuro, Lexend + Times New Roman, celular)
 js/config.js          repositório (dono, nome, branch, caminhos)
 js/app.js             interface: telas de acesso, pastas, lixeira, diário, configurações
 js/editor.js          editor visual e barra de formatação
