@@ -324,22 +324,37 @@ function resumo(t) {
 function metaDoTexto(t, comPasta = false) {
   const partes = [`editado ${quando(t.atualizadoEm)}`];
   if (t.tipo === "diario") partes.push(plural(entradasAtivas(t).length, "entrada", "entradas"));
-  if (comPasta) partes.push(`📁 ${pastaPorId(t.pastaId)?.nome || "?"}`);
+  if (comPasta) partes.push(`📓 ${pastaPorId(t.pastaId)?.nome || "?"}`);
   return partes.join(" · ");
 }
 
 const icone = (t) => (t.tipo === "diario" ? "📔" : "📄");
 
 // Setinha que abre "Editar" e "Lixeira".
-function menuAcoes(editar, lixeira, extra = "") {
+// itens: [{ rotulo, atributos, perigo }]
+function menuOpcoes(itens, extra = "") {
   return `
     <div class="menu-caixa menu-acoes">
       <button class="seta" type="button" data-acao="abrir-menu" title="Opções" aria-label="Opções" aria-expanded="false" ${extra}>▾</button>
       <div class="menu-barra direita menu-flutuante" hidden>
-        <button class="menu-item" type="button" data-acao="${editar}" ${extra}>Editar</button>
-        <button class="menu-item perigo" type="button" data-acao="${lixeira}" ${extra}>Lixeira</button>
+        ${itens.map((i) => `<button class="menu-item${i.perigo ? " perigo" : ""}" type="button" ${i.atributos}>${i.rotulo}</button>`).join("")}
       </div>
     </div>`;
+}
+
+function menuAcoes(editar, lixeira, extra = "") {
+  return menuOpcoes([
+    { rotulo: "Editar", atributos: `data-acao="${editar}" ${extra}` },
+    { rotulo: "Lixeira", atributos: `data-acao="${lixeira}" ${extra}`, perigo: true },
+  ], extra);
+}
+
+// Na lixeira: "Restaurar" ou "Apagar definitivamente".
+function menuLixeira(tipo, id, extra = "") {
+  return menuOpcoes([
+    { rotulo: "Restaurar", atributos: `data-restaurar-${tipo}="${esc(id)}" ${extra}` },
+    { rotulo: "Apagar definitivamente", atributos: `data-apagar-${tipo}="${esc(id)}" ${extra}`, perigo: true },
+  ]);
 }
 
 function fecharMenus(exceto = null) {
@@ -350,7 +365,7 @@ function fecharMenus(exceto = null) {
   });
 }
 
-const AJUDA_TIPOS = "Texto: um documento único (ex.: um protocolo).\nDiário: um registro em entradas com data e hora (ex.: a revisão de literatura feita um pouco por dia).";
+const AJUDA_TIPOS = "Texto pontual: um documento único (ex.: um protocolo).\nTexto contínuo: um registro em entradas com data e hora (ex.: a revisão de literatura feita um pouco por dia).";
 
 // ---------------------------------------------------------------------------
 // Navegação
@@ -457,7 +472,7 @@ function renderizarPaineis() {
 
   $("#lista-pastas").innerHTML = pastasAtivas().map((p) => `
     <button class="pasta ${estado.pastaAtual === p.id && estado.pagina !== "busca" ? "ativa" : ""}" data-pasta="${esc(p.id)}">
-      <span>📁 ${esc(p.nome)}</span><span class="contagem">${textosDaPasta(p.id).length}</span>
+      <span>📓 ${esc(p.nome)}</span><span class="contagem">${textosDaPasta(p.id).length}</span>
     </button>`).join("");
   const n = totalNaLixeira();
   const lix = $("#abrir-lixeira");
@@ -517,7 +532,7 @@ function paginaInicio(el) {
     const recentes = textos.slice(0, 3).map((t) => `<li>${icone(t)} ${esc(t.titulo || "Sem título")}</li>`).join("");
     return `
       <button class="cartao-pasta" data-pasta="${esc(p.id)}">
-        <span class="cartao-icone">📁</span>
+        <span class="cartao-icone">📓</span>
         <span class="cartao-nome">${esc(p.nome)}</span>
         <span class="cartao-meta">${plural(textos.length, "texto", "textos")}${textos[0] ? ` · editado ${esc(quando(textos[0].atualizadoEm))}` : ""}</span>
         ${recentes ? `<ul class="cartao-recentes">${recentes}</ul>` : ""}
@@ -528,13 +543,13 @@ function paginaInicio(el) {
     <div class="pagina pagina-inicio">
       <div class="inicio-pastas">
       <div class="pagina-topo">
-        <h1>Minhas pastas</h1>
+        <h1>Meus cadernos</h1>
         <input type="search" id="busca-inicio" placeholder="Buscar em tudo…" value="${esc(estado.busca)}">
       </div>
       <div class="grade-pastas">
         ${cartoes}
         <button class="cartao-pasta nova" data-acao="nova-pasta">
-          <span class="cartao-icone">＋</span><span class="cartao-nome">Nova pasta</span>
+          <span class="cartao-icone">＋</span><span class="cartao-nome">Novo caderno</span>
         </button>
         <button class="cartao-pasta lixeira" data-acao="abrir-lixeira">
           <span class="cartao-icone">🗑</span><span class="cartao-nome">Lixeira</span>
@@ -563,7 +578,7 @@ function montarLembretes(caixa) {
   const abertos = lerLS("caderno.concluidos") === "1";
   caixa.innerHTML = `
     <div class="lembretes-topo">
-      <h2>🔔 Lembretes</h2>
+      <h2>Lembretes</h2>
       ${pendentes.length ? `<span class="selo-contagem">${pendentes.length}</span>` : ""}
     </div>
     <form class="novo-lembrete" autocomplete="off">
@@ -579,7 +594,7 @@ function montarLembretes(caixa) {
             <span class="lembrete-meta">${esc(quando(l.criadoEm))}</span>
           </span>
         </label>
-      </li>`).join("")}</ul>` : `<p class="lembretes-vazio">Nada pendente. 🎉</p>`}
+      </li>`).join("")}</ul>` : `<p class="lembretes-vazio">Nada pendente.</p>`}
     ${concluidos.length ? `
     <details class="concluidos" ${abertos ? "open" : ""}>
       <summary>Concluídos (${concluidos.length})</summary>
@@ -634,14 +649,14 @@ function paginaPasta(el) {
   el.innerHTML = `
     <div class="pagina">
       <div class="pagina-topo">
-        <div class="titulo-pasta"><h1>📁 ${esc(p.nome)}</h1>${menuAcoes("renomear-pasta", "pasta-lixeira")}</div>
+        <div class="titulo-pasta"><h1>📓 ${esc(p.nome)}</h1>${menuAcoes("renomear-pasta", "pasta-lixeira")}</div>
       </div>
       <div class="acoes novo">
-        <button class="botao primario" data-acao="novo-texto">+ Novo texto</button>
-        <button class="botao" data-acao="novo-diario">+ Novo diário</button>
+        <button class="botao primario" data-acao="novo-texto">+ Novo texto pontual</button>
+        <button class="botao" data-acao="novo-diario">+ Novo texto contínuo</button>
         <span class="ajuda" tabindex="0" role="note" aria-label="${esc(AJUDA_TIPOS)}" data-dica="${esc(AJUDA_TIPOS)}">?</span>
       </div>
-      ${textos.length ? `<ul class="lista-grande">${textos.map((t) => itemGrande(t)).join("")}</ul>` : `<p class="vazio">Nenhum texto nesta pasta ainda.</p>`}
+      ${textos.length ? `<ul class="lista-grande">${textos.map((t) => itemGrande(t)).join("")}</ul>` : `<p class="vazio">Nenhum texto neste caderno ainda.</p>`}
     </div>`;
 }
 
@@ -667,20 +682,20 @@ function paginaLixeira(el) {
   el.innerHTML = `
     <div class="pagina">
       <div class="pagina-topo"><h1>🗑 Lixeira</h1></div>
-      <p class="dica">Nada que vem para cá é apagado. Restaure quando quiser.</p>
+      <p class="dica">Os itens ficam aqui até você restaurar ou apagar definitivamente (pela setinha ▾).</p>
       ${vazia ? `<p class="vazio">A lixeira está vazia.</p>` : ""}
-      ${secao("Pastas", l.pastas.map((p) => linha(
-        `📁 ${esc(p.nome)}`,
-        `${plural(estado.dados.textos.filter((t) => t.pastaId === p.id).length, "texto", "textos")} dentro · enviada ${esc(quando(p.naLixeira))}`,
-        `<button class="botao pequeno" data-restaurar-pasta="${esc(p.id)}">Restaurar</button>`)))}
+      ${secao("Cadernos", l.pastas.map((p) => linha(
+        `📓 ${esc(p.nome)}`,
+        `${plural(estado.dados.textos.filter((t) => t.pastaId === p.id).length, "texto", "textos")} dentro · enviado ${esc(quando(p.naLixeira))}`,
+        menuLixeira("pasta", p.id))))}
       ${secao("Textos", l.textos.map((t) => linha(
         `${icone(t)} ${esc(t.titulo || "Sem título")}`,
-        `da pasta ${esc(pastaPorId(t.pastaId)?.nome || "?")} · enviado ${esc(quando(t.naLixeira))}`,
-        `<button class="botao pequeno" data-texto="${esc(t.id)}">Ver</button><button class="botao pequeno" data-restaurar-texto="${esc(t.id)}">Restaurar</button>`)))}
-      ${secao("Entradas de diário", l.entradas.map(({ texto, entrada }) => linha(
+        `do caderno ${esc(pastaPorId(t.pastaId)?.nome || "?")} · enviado ${esc(quando(t.naLixeira))}`,
+        `<button class="botao pequeno" data-texto="${esc(t.id)}">Ver</button>${menuLixeira("texto", t.id)}`)))}
+      ${secao("Entradas de texto contínuo", l.entradas.map(({ texto, entrada }) => linha(
         `📔 Entrada de ${esc(dataCurta(entrada.data))}, ${esc(entrada.hora)}`,
-        `do diário “${esc(texto.titulo || "Sem título")}” · enviada ${esc(quando(entrada.naLixeira))}${textoDeHtml(entrada.corpo) ? ` · “${esc(textoDeHtml(entrada.corpo).slice(0, 60))}…”` : ""}`,
-        `<button class="botao pequeno" data-restaurar-entrada="${esc(entrada.id)}" data-diario="${esc(texto.id)}">Restaurar</button>`)))}
+        `do texto contínuo “${esc(texto.titulo || "Sem título")}” · enviada ${esc(quando(entrada.naLixeira))}${textoDeHtml(entrada.corpo) ? ` · “${esc(textoDeHtml(entrada.corpo).slice(0, 60))}…”` : ""}`,
+        menuLixeira("entrada", entrada.id, `data-diario="${esc(texto.id)}"`))))}
     </div>`;
 }
 
@@ -719,7 +734,7 @@ function paginaTexto(el) {
           </div>
         </div>
         ${naLixeira
-          ? `<button class="botao pequeno primario" data-restaurar-texto="${esc(t.id)}">Restaurar</button>`
+          ? menuLixeira("texto", t.id)
           : menuAcoes("editar-texto", "texto-lixeira")}
       </div>
       ${naLixeira ? `<p class="aviso-lixeira">Este texto está na lixeira desde ${esc(quando(t.naLixeira))}. Restaure para voltar a editar.</p>` : ""}
@@ -727,8 +742,8 @@ function paginaTexto(el) {
       <div class="folha">
         <input class="titulo-texto documento" id="titulo-texto" value="${esc(t.titulo)}" placeholder="Título" ${escrever ? "" : "readonly"}>
         <div class="meta-texto" ${escrever ? "" : "hidden"}>
-          <label>📁 <select id="mover-texto" ${naLixeira ? "disabled" : ""}>${opcoesPasta}</select></label>
-          <span>${t.tipo === "diario" ? "📔 Diário" : "📄 Texto"}</span>
+          <label>📓 <select id="mover-texto" ${naLixeira ? "disabled" : ""}>${opcoesPasta}</select></label>
+          <span>${t.tipo === "diario" ? "📔 Texto contínuo" : "📄 Texto pontual"}</span>
           <span>criado ${esc(quando(t.criadoEm))}</span>
           <span>editado ${esc(quando(t.atualizadoEm))}</span>
         </div>
@@ -763,7 +778,7 @@ function paginaTexto(el) {
   montarEditor($("#corpo-texto"), {
     html: t.corpo,
     editavel: escrever,
-    placeholder: t.tipo === "diario" ? "Objetivo do diário, perguntas da revisão, palavras-chave…" : "Comece a escrever…",
+    placeholder: t.tipo === "diario" ? "Objetivo do texto, perguntas da revisão, palavras-chave…" : "Comece a escrever…",
     aoMudar: (html) => { t.corpo = html; tocarTexto(t); },
   });
 
@@ -894,7 +909,7 @@ function novoTexto(tipo) {
   const t = agora();
   const texto = {
     id: novoId("texto"), pastaId, tipo, formato: "html",
-    titulo: tipo === "diario" ? `Diário — ${new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}` : "",
+    titulo: tipo === "diario" ? `Texto contínuo — ${new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}` : "",
     corpo: "", entradas: tipo === "diario" ? [] : undefined,
     criadoEm: t, atualizadoEm: t,
   };
@@ -923,7 +938,58 @@ function pastaParaLixeira(p) {
   p.atualizadoEm = agora();
   marcarAlterado();
   abrirInicio();
-  avisar(`A pasta “${p.nome}” foi para a lixeira (com os textos dela).`, () => restaurarPasta(p.id));
+  avisar(`O caderno “${p.nome}” foi para a lixeira (com os textos dele).`, () => restaurarPasta(p.id));
+}
+
+// ── Apagar definitivamente (só a partir da lixeira) ──
+
+const AVISO_APAGAR = "Tem certeza que deseja excluir definitivamente? Caso seja um documento que pode ser utilizado posteriormente, mesmo que haja poucas chances, é adequado manter por precaução. Às vezes eu utilizo dados de anos atrás :)";
+
+function confirmarApagar(oque) {
+  return confirm(`${oque}\n\n${AVISO_APAGAR}`);
+}
+
+function depoisDeApagar(msg) {
+  marcarAlterado();
+  if (estado.pagina === "lixeira") { renderizarPaineis(); renderizarPrincipal(); }
+  else abrirLixeira();
+  avisar(msg);
+}
+
+function apagarPasta(id) {
+  const p = pastaPorId(id);
+  if (!p) return;
+  const dentro = estado.dados.textos.filter((t) => t.pastaId === id);
+  const extra = !dentro.length ? ""
+    : dentro.length === 1 ? " O texto que está dentro dele também será apagado."
+    : ` Os ${dentro.length} textos que estão dentro dele também serão apagados.`;
+  if (!confirmarApagar(`Apagar definitivamente o caderno “${p.nome}”?${extra}`)) return;
+  const t = agora();
+  estado.dados.pastas = estado.dados.pastas.filter((x) => x.id !== id);
+  estado.dados.textos = estado.dados.textos.filter((x) => x.pastaId !== id);
+  estado.dados.removidos[id] = t;
+  for (const x of dentro) estado.dados.removidos[x.id] = t;
+  depoisDeApagar(`O caderno “${p.nome}” foi apagado definitivamente.`);
+}
+
+function apagarTexto(id) {
+  const t = textoPorId(id);
+  if (!t) return;
+  if (!confirmarApagar(`Apagar definitivamente “${t.titulo || "Sem título"}”?`)) return;
+  estado.dados.textos = estado.dados.textos.filter((x) => x.id !== id);
+  estado.dados.removidos[id] = agora();
+  if (estado.textoAtual === id) estado.textoAtual = null;
+  depoisDeApagar(`“${t.titulo || "Sem título"}” foi apagado definitivamente.`);
+}
+
+function apagarEntrada(diarioId, entradaId) {
+  const t = textoPorId(diarioId);
+  const en = t?.entradas?.find((e) => e.id === entradaId);
+  if (!en) return;
+  if (!confirmarApagar(`Apagar definitivamente a entrada de ${dataCurta(en.data)}, ${en.hora}, do texto contínuo “${t.titulo || "Sem título"}”?`)) return;
+  t.entradas = t.entradas.filter((e) => e.id !== entradaId);
+  t.atualizadoEm = agora();
+  depoisDeApagar("A entrada foi apagada definitivamente.");
 }
 
 function restaurarPasta(id) {
@@ -934,7 +1000,7 @@ function restaurarPasta(id) {
   marcarAlterado();
   renderizarPaineis();
   renderizarPrincipal();
-  avisar(`Pasta “${p.nome}” restaurada.`);
+  avisar(`Caderno “${p.nome}” restaurado.`);
 }
 
 function restaurarTexto(id, abrir = true) {
@@ -962,7 +1028,7 @@ function restaurarEntrada(diarioId, entradaId) {
   en.atualizadoEm = agora();
   tocarTexto(t);
   renderizarPrincipal();
-  avisar(`Entrada restaurada no diário “${t.titulo || "Sem título"}”.`);
+  avisar(`Entrada restaurada no texto contínuo “${t.titulo || "Sem título"}”.`);
 }
 
 function criarPasta(nome) {
@@ -974,7 +1040,7 @@ function criarPasta(nome) {
 }
 
 function novaPasta() {
-  const nome = prompt("Nome da nova pasta:");
+  const nome = prompt("Nome do novo caderno:");
   if (!nome?.trim()) return;
   abrirPasta(criarPasta(nome.trim()).id);
 }
@@ -1039,6 +1105,9 @@ function configurarApp() {
     if (d.restaurarPasta) return restaurarPasta(d.restaurarPasta);
     if (d.restaurarTexto) return restaurarTexto(d.restaurarTexto);
     if (d.restaurarEntrada) return restaurarEntrada(d.diario, d.restaurarEntrada);
+    if (d.apagarPasta) return apagarPasta(d.apagarPasta);
+    if (d.apagarTexto) return apagarTexto(d.apagarTexto);
+    if (d.apagarEntrada) return apagarEntrada(d.diario, d.apagarEntrada);
     if (d.exportar) return exportar(d.exportar);
     if (d.modo) {
       estado.modo = d.modo;
@@ -1060,7 +1129,7 @@ function configurarApp() {
       case "editar-texto": return editarTexto();
       case "renomear-pasta": {
         const p = pastaPorId(estado.pastaAtual);
-        const nome = prompt("Novo nome da pasta:", p.nome);
+        const nome = prompt("Novo nome do caderno:", p.nome);
         if (!nome?.trim()) return;
         p.nome = nome.trim();
         p.atualizadoEm = agora();
@@ -1333,7 +1402,7 @@ function configurarDialogoConfig() {
     try {
       const b = JSON.parse(await arquivo.text());
       if (b.formato !== "caderno-backup" || !Array.isArray(b.pastas) || !Array.isArray(b.textos)) throw new Error("Este arquivo não é um backup do Caderno.");
-      if (!confirm(`Juntar o backup (${b.pastas.length} pastas, ${b.textos.length} textos) ao caderno atual? Em textos repetidos, vale a versão editada por último.`)) return;
+      if (!confirm(`Juntar o backup (${b.pastas.length} cadernos, ${b.textos.length} textos) ao que já existe? Em textos repetidos, vale a versão editada por último.`)) return;
       const importados = { pastas: b.pastas, textos: b.textos, lembretes: b.lembretes || [], removidos: {} };
       migrar(importados);
       estado.dados = mesclarDados(estado.dados, importados);

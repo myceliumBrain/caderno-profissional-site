@@ -80,8 +80,8 @@
   <!-- Aplicativo -->
   <div id="app" class="tela" data-pagina="inicio" hidden>
     <header class="topo">
-      <button class="icone so-celular" id="abrir-gaveta" title="Pastas">☰</button>
-      <button class="marca" id="ir-inicio" title="Voltar às pastas">📓 Caderno</button>
+      <button class="icone so-celular" id="abrir-gaveta" title="Cadernos">☰</button>
+      <button class="marca" id="ir-inicio" title="Voltar aos cadernos">Caderno</button>
       <span class="status" id="status"></span>
       <button class="botao pequeno" id="salvar" title="Salvar agora (Ctrl+S)">Salvar</button>
       <button class="icone" id="abrir-config" title="Configurações">⚙</button>
@@ -91,17 +91,17 @@
       <!-- Painel 1: pastas (pode ser recolhido) -->
       <aside class="painel painel-pastas" id="painel-pastas">
         <div class="painel-cabeca">
-          <span class="painel-titulo">Pastas</span>
+          <span class="painel-titulo">Cadernos</span>
           <button class="recolher" data-painel="pastas" title="Recolher">«</button>
         </div>
         <div class="painel-conteudo">
           <button class="pasta" id="voltar-inicio">⌂ Início</button>
           <input type="search" id="busca" placeholder="Buscar em tudo…">
           <nav id="lista-pastas"></nav>
-          <button class="botao fantasma" id="nova-pasta">+ Nova pasta</button>
+          <button class="botao fantasma" id="nova-pasta">+ Novo caderno</button>
           <button class="pasta lixeira" id="abrir-lixeira"></button>
         </div>
-        <button class="trilho" data-painel="pastas" title="Mostrar as pastas"><span>»</span><span class="trilho-rotulo">Pastas</span></button>
+        <button class="trilho" data-painel="pastas" title="Mostrar os cadernos"><span>»</span><span class="trilho-rotulo">Cadernos</span></button>
       </aside>
 
       <!-- Painel 2: textos da pasta (começa recolhido) -->
@@ -113,7 +113,7 @@
         <div class="painel-conteudo">
           <ul id="lista-textos"></ul>
         </div>
-        <button class="trilho" data-painel="lista" title="Mostrar os textos da pasta"><span>»</span><span class="trilho-rotulo">Textos</span></button>
+        <button class="trilho" data-painel="lista" title="Mostrar os textos do caderno"><span>»</span><span class="trilho-rotulo">Textos</span></button>
       </aside>
 
       <main class="principal" id="principal"></main>

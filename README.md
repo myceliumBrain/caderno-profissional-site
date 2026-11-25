@@ -1,23 +1,23 @@
 # Caderno — agenda pessoal criptografada
 
 Site estático (HTML + CSS + JavaScript, sem build) para guardar textos em
-pastas temáticas: protocolos do laboratório, revisão de literatura, etc.
+cadernos temáticos: protocolos do laboratório, revisão de literatura, etc.
 Funciona como o painel do astrobotanica: o repositório é fixo em
 `js/config.js` (`myceliumBrain/caderno-profissional-site`), o primeiro acesso
 pede só o **token do GitHub e uma senha**, e depois disso o site pede só a
 senha. Dois arquivos:
 
 - `data/auth.json`: o token do GitHub, criptografado.
-- `data/caderno.json`: pastas e textos, **criptografados** com a mesma chave.
+- `data/caderno.json`: cadernos e textos, **criptografados** com a mesma chave.
 
 O repositório e o site podem ser públicos: sem a senha (ou o código de
 recuperação), os arquivos são ilegíveis.
 
 ## Como funciona
 
-- **Pastas** em cartões grandes na tela inicial; dentro delas, dois tipos de texto:
-  - **Texto**: um documento único (ex.: um protocolo).
-  - **Diário**: uma descrição opcional + **entradas com data e hora**, numeradas,
+- **Cadernos** em cartões grandes na tela inicial (“Meus cadernos”); dentro deles, dois tipos de texto:
+  - **Texto pontual**: um documento único (ex.: um protocolo).
+  - **Texto contínuo**: uma descrição opcional + **entradas com data e hora**, numeradas,
     numa linha do tempo (a mais recente no topo). Feito para a revisão de
     literatura em que você avança um pouco por dia.
 - **Editor visual** (Escrever / Ler) com barra de formatação: negrito, itálico,
@@ -25,13 +25,15 @@ recuperação), os arquivos são ilegíveis.
   **passos** com caixinha (marcável também no modo Ler, útil na bancada),
   tabelas, alinhamento e limpar formatação. Textos em Times New Roman; a
   interface em Lexend. Tema claro ou escuro (⚙ → Aparência). Ao colar de Word/PDF/sites, a formatação estranha é limpa.
-- **Painéis laterais recolhíveis**: pastas e lista de textos (esta começa recolhida).
-- **Lembretes** na página inicial, ao lado das pastas: coisas pontuais para
+- **Painéis laterais recolhíveis**: cadernos e lista de textos (esta começa recolhida).
+- **Lembretes** na página inicial, ao lado dos cadernos: coisas pontuais para
   hoje ou amanhã. Marcar como feito leva para “Concluídos”; só ali dá para
-  excluir de vez (os lembretes são a única coisa que o caderno apaga).
-- **Lixeira**: nada é apagado. Pastas, textos e entradas vão para a Lixeira
-  (depois de “Nova pasta”) e podem ser restaurados a qualquer momento.
-- **Exportar** cada texto (o diário inteiro, com as entradas) em PDF, Word
+  excluir de vez.
+- **Lixeira**: cadernos, textos e entradas vão para a Lixeira (depois de “Novo
+  caderno”). Lá, a setinha ▾ de cada item permite **Restaurar** ou **Apagar
+  definitivamente** (sempre com um aviso de confirmação; apagar um caderno
+  apaga também os textos dentro dele).
+- **Exportar** cada texto (o texto contínuo inteiro, com as entradas) em PDF, Word
   (.docx) e .txt.
 - **Nada se perde**: cada alteração é copiada em segundos para o navegador
   (cifrada com a sua chave). Se a aba fechar ou a internet cair, ao entrar de
@@ -93,7 +95,7 @@ Para usar outro repositório, mude `js/config.js`.
 index.html            telas (criação, código, login, recuperação, app)
 css/style.css         visual (tema claro ou escuro, Lexend + Times New Roman, celular)
 js/config.js          repositório (dono, nome, branch, caminhos)
-js/app.js             interface: telas de acesso, pastas, lixeira, diário, configurações
+js/app.js             interface: telas de acesso, cadernos, lixeira, textos contínuos, lembretes, configurações
 js/editor.js          editor visual e barra de formatação
 js/exportar.js        exportar em PDF, DOCX e TXT
 js/rascunho.js        cópia local cifrada e posição onde você parou
@@ -104,7 +106,7 @@ js/mesclar.js         junta versões vindas de aparelhos diferentes
 vendor/               DOMPurify (sanitização), docx (gerar .docx), marked (converte textos antigos em Markdown)
 serve.py              servidor local
 data/auth.json        token do GitHub, cifrado (criado no primeiro acesso)
-data/caderno.json     pastas e textos, cifrados (criado no primeiro acesso)
+data/caderno.json     cadernos e textos, cifrados (criado no primeiro acesso)
 ```
 
 ### Formato de `data/caderno.json` (depois de decifrado)
