@@ -27,8 +27,12 @@ recuperação), os arquivos são ilegíveis.
   interface em Lexend. Tema claro ou escuro (⚙ → Aparência). Ao colar de Word/PDF/sites, a formatação estranha é limpa.
 - **Painéis laterais recolhíveis**: cadernos e lista de textos (esta começa recolhida).
 - **Lembretes** na página inicial, ao lado dos cadernos: coisas pontuais para
-  hoje ou amanhã. Marcar como feito leva para “Concluídos”; só ali dá para
-  excluir de vez.
+  hoje ou amanhã. O **+** oferece *Criar pasta* ou *Criar lembrete*: pastas
+  (ex.: “Laboratório”, “Casa”) abrem dentro do próprio quadro e guardam seus
+  lembretes. Lembretes e pastas podem ter cor: 🔴 Prioritário, 🔵 Intelectual,
+  🟢 Rotina, 🟡 Social (lembrete novo numa pasta herda a cor dela). Marcar como
+  feito leva para “Concluídos”; só ali dá para excluir de vez. A setinha ▾ da
+  pasta permite editar nome/cor ou excluí-la (com os lembretes dentro).
 - **Lixeira**: cadernos, textos e entradas vão para a Lixeira (depois de “Novo
   caderno”). Lá, a setinha ▾ de cada item permite **Restaurar** ou **Apagar
   definitivamente** (sempre com um aviso de confirmação; apagar um caderno

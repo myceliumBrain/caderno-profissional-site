@@ -619,9 +619,65 @@ dialog form label { width: 100%; }
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--acento); color: var(--acento-texto); font-size: .75rem; font-weight: 600;
 }
-.novo-lembrete { display: flex; gap: .4rem; margin-bottom: .8rem; }
-#app .novo-lembrete input { margin: 0; padding: .45rem .6rem; font-size: .9rem; }
-.novo-lembrete .botao { font-size: 1.1rem; padding: 0 .75rem; }
+/* Cores dos lembretes e pastas: Prioritário, Intelectual, Rotina, Social */
+:root {
+  --lem-vermelho: #c8402f; --lem-vermelho-fundo: #fbe9e6;
+  --lem-azul: #2f63b3;     --lem-azul-fundo: #e6eefb;
+  --lem-verde: #2f8a4f;    --lem-verde-fundo: #e3f3e8;
+  --lem-amarelo: #c99a10;  --lem-amarelo-fundo: #fbf3d9;
+}
+:root[data-tema="escuro"] {
+  --lem-vermelho: #ec7a68; --lem-vermelho-fundo: #3a2420;
+  --lem-azul: #79a5ec;     --lem-azul-fundo: #1f2a3c;
+  --lem-verde: #6fc28c;    --lem-verde-fundo: #1f3326;
+  --lem-amarelo: #e6c25a;  --lem-amarelo-fundo: #3a3220;
+}
+.cor-vermelho { --cor: var(--lem-vermelho); --cor-fundo: var(--lem-vermelho-fundo); }
+.cor-azul     { --cor: var(--lem-azul);     --cor-fundo: var(--lem-azul-fundo); }
+.cor-verde    { --cor: var(--lem-verde);    --cor-fundo: var(--lem-verde-fundo); }
+.cor-amarelo  { --cor: var(--lem-amarelo);  --cor-fundo: var(--lem-amarelo-fundo); }
+.cor-nenhuma  { --cor: var(--borda);        --cor-fundo: var(--painel-2); }
+
+.bolinha { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; background: var(--cor); flex: none; }
+.lembretes-topo h2 { display: flex; align-items: center; gap: .45rem; min-width: 0; overflow-wrap: anywhere; }
+.etiqueta-cor {
+  display: inline-block; padding: 0 .4rem; border-radius: 99px; font-size: .68rem; font-weight: 600;
+  color: var(--cor); background: var(--cor-fundo); line-height: 1.45;
+}
+.mais-lembrete { font-size: 1.15rem; line-height: 1; width: 2rem; height: 2rem; padding: 0; }
+.voltar-lembretes {
+  border: 1px solid var(--borda); background: var(--painel); color: var(--suave);
+  border-radius: 7px; width: 1.9rem; height: 1.9rem; cursor: pointer; flex: none;
+}
+.voltar-lembretes:hover { color: var(--texto); border-color: var(--acento); }
+
+.form-lembrete {
+  display: flex; flex-direction: column; gap: .55rem; margin-bottom: .9rem;
+  padding: .7rem; border: 1px solid var(--borda); border-radius: 10px; background: var(--painel-2);
+}
+#app .form-lembrete input:not([type=radio]) { margin: 0; padding: .45rem .6rem; font-size: .9rem; }
+.form-botoes { display: flex; justify-content: flex-end; gap: .4rem; }
+.escolher-cor { display: flex; flex-wrap: wrap; gap: .3rem; }
+.opcao-cor {
+  display: inline-flex; align-items: center; gap: .3rem; cursor: pointer;
+  padding: .2rem .5rem; border: 1px solid var(--borda); border-radius: 99px;
+  font-size: .76rem; font-weight: 400; background: var(--painel);
+}
+.opcao-cor input { position: absolute; opacity: 0; pointer-events: none; }
+.opcao-cor:has(input:checked) { border-color: var(--texto); font-weight: 600; }
+.opcao-cor:has(input:focus-visible) { outline: 2px solid var(--acento); outline-offset: 1px; }
+
+.pastas-lembretes { list-style: none; margin: 0 0 .7rem; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+.pasta-lembrete {
+  width: 100%; display: flex; align-items: center; gap: .5rem; text-align: left; cursor: pointer;
+  padding: .5rem .6rem; font-size: .9rem; color: var(--texto);
+  background: var(--painel); border: 1px solid var(--borda); border-left: 4px solid var(--cor); border-radius: 8px;
+}
+.pasta-lembrete:hover { background: var(--cor-fundo); }
+.pasta-lembrete-nome { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pasta-lembrete-n { font-size: .75rem; color: var(--suave); min-width: 1ch; }
+.lista-lembretes li[class*="cor-"] { box-shadow: inset 3px 0 0 var(--cor); padding-left: .55rem; }
+.lista-lembretes li[class*="cor-"] .lembrete input[type=checkbox] { accent-color: var(--cor); }
 .lista-lembretes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .lista-lembretes li { display: flex; align-items: flex-start; gap: .4rem; padding: .5rem .25rem; border-top: 1px solid var(--borda); }
 .lista-lembretes li:first-child { border-top: 0; }

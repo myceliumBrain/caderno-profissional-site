@@ -24,5 +24,6 @@ export function mesclarDados(local, remoto) {
     pastas: mesclarListas(local.pastas || [], remoto.pastas || [], removidos),
     textos: mesclarListas(local.textos || [], remoto.textos || [], removidos),
     lembretes: mesclarListas(local.lembretes || [], remoto.lembretes || [], removidos),
+    pastasLembretes: mesclarListas(local.pastasLembretes || [], remoto.pastasLembretes || [], removidos),
   };
 }

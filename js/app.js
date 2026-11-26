@@ -42,7 +42,7 @@ const estado = {
   shaCaderno: null,
   chave: null,
   github: null,
-  dados: null,          // { pastas, textos, lembretes, removidos }
+  dados: null,          // { pastas, textos, lembretes, pastasLembretes, removidos }
   pendente: false,
   salvando: false,
   salvarDeNovo: false,
@@ -107,6 +107,7 @@ function dadosIniciais() {
     ],
     textos: [],
     lembretes: [],
+    pastasLembretes: [],
     removidos: {},
   };
 }
@@ -119,6 +120,7 @@ function migrar(d) {
   d.textos ||= [];
   d.removidos ||= {};
   d.lembretes ||= [];
+  d.pastasLembretes ||= [];
   for (const t of d.textos) {
     if (t.formato !== "html") {
       t.corpo = markdownParaHtml(t.corpo || "");
@@ -567,79 +569,202 @@ function paginaInicio(el) {
 }
 
 // ── Lembretes (página inicial) ──
+// O "+" abre "Criar pasta" / "Criar lembrete". Pastas agrupam lembretes por
+// tema (ex.: laboratório, casa) e se abrem dentro do próprio quadro.
 // Pendentes ficam no topo; concluídos vão para "Concluídos", onde podem
 // voltar ou ser excluídos de vez (os únicos itens que o caderno apaga).
 
+const CORES_LEMBRETE = [
+  { id: "vermelho", rotulo: "Prioritário" },
+  { id: "azul", rotulo: "Intelectual" },
+  { id: "verde", rotulo: "Rotina" },
+  { id: "amarelo", rotulo: "Social" },
+];
+const rotuloCor = (c) => CORES_LEMBRETE.find((x) => x.id === c)?.rotulo || "";
+const lem = { pasta: null, form: null, editandoPasta: null }; // estado do quadro
+
+function escolherCor(nome, atual) {
+  const opcoes = [{ id: "", rotulo: "Sem cor" }, ...CORES_LEMBRETE];
+  return `
+    <div class="escolher-cor" role="radiogroup" aria-label="Cor">
+      ${opcoes.map((c) => `
+        <label class="opcao-cor" title="${esc(c.rotulo)}">
+          <input type="radio" name="${nome}" value="${c.id}" ${c.id === (atual || "") ? "checked" : ""}>
+          <span class="bolinha cor-${c.id || "nenhuma"}"></span><span>${esc(c.rotulo)}</span>
+        </label>`).join("")}
+    </div>`;
+}
+
+function itemLembrete(l, feito) {
+  const cor = l.cor ? ` cor-${l.cor}` : "";
+  return `
+    <li class="${feito ? "feito" : ""}${cor}" data-lembrete="${esc(l.id)}">
+      <label class="lembrete">
+        <input type="checkbox" ${feito ? `checked data-reabrir="${esc(l.id)}" title="Voltar para pendentes"` : `data-concluir="${esc(l.id)}" title="Marcar como concluído"`}>
+        <span class="lembrete-corpo">
+          <span class="lembrete-texto">${esc(l.texto)}</span>
+          <span class="lembrete-meta">${l.cor ? `<span class="etiqueta-cor cor-${l.cor}">${esc(rotuloCor(l.cor))}</span> ` : ""}${feito ? `concluído ${esc(quando(l.concluidoEm))}` : esc(quando(l.criadoEm))}</span>
+        </span>
+      </label>
+      ${feito ? `<button class="excluir-lembrete" type="button" data-excluir="${esc(l.id)}" title="Excluir de vez">Excluir</button>` : ""}
+    </li>`;
+}
+
 function montarLembretes(caixa) {
-  const pendentes = estado.dados.lembretes.filter((l) => !l.concluidoEm)
+  const d = estado.dados;
+  const pasta = lem.pasta && d.pastasLembretes.find((p) => p.id === lem.pasta);
+  if (!pasta) lem.pasta = null;
+  // Lembrete cuja pasta sumiu (ex.: excluída em outro aparelho) aparece na raiz.
+  const ids = new Set(d.pastasLembretes.map((p) => p.id));
+  const pastaDe = (l) => (l.pasta && ids.has(l.pasta) ? l.pasta : null);
+  const daqui = d.lembretes.filter((l) => pastaDe(l) === lem.pasta);
+  const pendentes = daqui.filter((l) => !l.concluidoEm)
     .sort((a, b) => (a.criadoEm || "").localeCompare(b.criadoEm || ""));
-  const concluidos = estado.dados.lembretes.filter((l) => l.concluidoEm)
+  const concluidos = daqui.filter((l) => l.concluidoEm)
     .sort((a, b) => b.concluidoEm.localeCompare(a.concluidoEm));
+  const pendentesDa = (id) => d.lembretes.filter((l) => l.pasta === id && !l.concluidoEm).length;
+  const pastas = pasta ? [] : [...d.pastasLembretes].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
   const abertos = lerLS("caderno.concluidos") === "1";
+  const editando = lem.editandoPasta && d.pastasLembretes.find((p) => p.id === lem.editandoPasta);
+
+  let form = "";
+  if (lem.form === "lembrete") {
+    form = `
+      <form class="form-lembrete" data-form="lembrete" autocomplete="off">
+        <input name="texto" maxlength="300" placeholder="Novo lembrete…" aria-label="Novo lembrete">
+        ${escolherCor("cor", pasta?.cor || "")}
+        <div class="form-botoes">
+          <button class="botao pequeno" type="button" data-lem="cancelar">Cancelar</button>
+          <button class="botao primario pequeno" type="submit">Adicionar</button>
+        </div>
+      </form>`;
+  } else if (lem.form === "pasta" || editando) {
+    form = `
+      <form class="form-lembrete" data-form="pasta" autocomplete="off">
+        <input name="nome" maxlength="80" placeholder="Nome da pasta (ex.: Laboratório)" aria-label="Nome da pasta" value="${esc(editando?.nome || "")}">
+        ${escolherCor("cor", editando?.cor || "")}
+        <div class="form-botoes">
+          <button class="botao pequeno" type="button" data-lem="cancelar">Cancelar</button>
+          <button class="botao primario pequeno" type="submit">${editando ? "Salvar" : "Criar pasta"}</button>
+        </div>
+      </form>`;
+  }
+
   caixa.innerHTML = `
     <div class="lembretes-topo">
-      <h2>Lembretes</h2>
+      ${pasta ? `<button class="voltar-lembretes" type="button" data-lem="voltar" title="Voltar para Lembretes" aria-label="Voltar para Lembretes">←</button>` : ""}
+      <h2>${pasta ? `<span class="bolinha cor-${pasta.cor || "nenhuma"}"></span>${esc(pasta.nome)}` : "Lembretes"}</h2>
       ${pendentes.length ? `<span class="selo-contagem">${pendentes.length}</span>` : ""}
+      <span class="espaco"></span>
+      ${pasta ? `
+        <div class="menu-caixa menu-acoes">
+          <button class="seta" type="button" data-acao="abrir-menu" title="Opções da pasta" aria-label="Opções da pasta" aria-expanded="false">▾</button>
+          <div class="menu-barra direita menu-flutuante" hidden>
+            <button class="menu-item" type="button" data-lem="editar-pasta">Editar pasta</button>
+            <button class="menu-item perigo" type="button" data-lem="excluir-pasta">Excluir pasta</button>
+          </div>
+        </div>` : ""}
+      <div class="menu-caixa">
+        <button class="botao primario pequeno mais-lembrete" type="button" ${pasta ? `data-lem="novo-lembrete"` : `data-acao="abrir-menu"`} title="${pasta ? "Criar lembrete" : "Criar…"}" aria-label="${pasta ? "Criar lembrete" : "Criar"}" aria-expanded="false">+</button>
+        ${pasta ? "" : `
+        <div class="menu-barra direita menu-flutuante" hidden>
+          <button class="menu-item" type="button" data-lem="nova-pasta">📁 Criar pasta</button>
+          <button class="menu-item" type="button" data-lem="novo-lembrete">☑ Criar lembrete</button>
+        </div>`}
+      </div>
     </div>
-    <form class="novo-lembrete" autocomplete="off">
-      <input name="texto" maxlength="300" placeholder="Novo lembrete…" aria-label="Novo lembrete">
-      <button class="botao primario pequeno" type="submit" title="Adicionar">+</button>
-    </form>
-    ${pendentes.length ? `<ul class="lista-lembretes">${pendentes.map((l) => `
-      <li data-lembrete="${esc(l.id)}">
-        <label class="lembrete">
-          <input type="checkbox" data-concluir="${esc(l.id)}" title="Marcar como concluído">
-          <span class="lembrete-corpo">
-            <span class="lembrete-texto">${esc(l.texto)}</span>
-            <span class="lembrete-meta">${esc(quando(l.criadoEm))}</span>
-          </span>
-        </label>
-      </li>`).join("")}</ul>` : `<p class="lembretes-vazio">Nada pendente.</p>`}
+    ${form}
+    ${pastas.length ? `<ul class="pastas-lembretes">${pastas.map((p) => {
+      const n = pendentesDa(p.id);
+      return `<li><button type="button" class="pasta-lembrete cor-${p.cor || "nenhuma"}" data-lem-pasta="${esc(p.id)}">
+        <span class="pasta-lembrete-icone">📁</span>
+        <span class="pasta-lembrete-nome">${esc(p.nome)}</span>
+        ${p.cor ? `<span class="etiqueta-cor cor-${p.cor}">${esc(rotuloCor(p.cor))}</span>` : ""}
+        <span class="pasta-lembrete-n">${n || ""}</span>
+      </button></li>`;
+    }).join("")}</ul>` : ""}
+    ${pendentes.length ? `<ul class="lista-lembretes">${pendentes.map((l) => itemLembrete(l, false)).join("")}</ul>`
+      : (pastas.length ? "" : `<p class="lembretes-vazio">Nada pendente.</p>`)}
     ${concluidos.length ? `
     <details class="concluidos" ${abertos ? "open" : ""}>
       <summary>Concluídos (${concluidos.length})</summary>
-      <ul class="lista-lembretes">${concluidos.map((l) => `
-        <li class="feito" data-lembrete="${esc(l.id)}">
-          <label class="lembrete">
-            <input type="checkbox" checked data-reabrir="${esc(l.id)}" title="Voltar para pendentes">
-            <span class="lembrete-corpo">
-              <span class="lembrete-texto">${esc(l.texto)}</span>
-              <span class="lembrete-meta">concluído ${esc(quando(l.concluidoEm))}</span>
-            </span>
-          </label>
-          <button class="excluir-lembrete" type="button" data-excluir="${esc(l.id)}" title="Excluir de vez">Excluir</button>
-        </li>`).join("")}</ul>
+      <ul class="lista-lembretes">${concluidos.map((l) => itemLembrete(l, true)).join("")}</ul>
     </details>` : ""}`;
 
-  const form = caixa.querySelector(".novo-lembrete");
-  form.addEventListener("submit", (e) => {
+  const redesenhar = () => montarLembretes(caixa);
+  caixa.querySelector(".form-lembrete input[type=text], .form-lembrete input:not([type])")?.focus();
+
+  caixa.querySelector(".form-lembrete")?.addEventListener("submit", (e) => {
     e.preventDefault();
-    const texto = form.texto.value.trim();
-    if (!texto) return;
+    const f = e.target;
+    const cor = f.querySelector("input[name=cor]:checked")?.value || null;
     const t = agora();
-    estado.dados.lembretes.push({ id: novoId("lembrete"), texto, criadoEm: t, atualizadoEm: t, concluidoEm: null });
-    marcarAlterado();
-    montarLembretes(caixa);
-    caixa.querySelector(".novo-lembrete input").focus();
+    if (f.dataset.form === "lembrete") {
+      const texto = f.texto.value.trim();
+      if (!texto) return;
+      d.lembretes.push({ id: novoId("lembrete"), texto, cor, pasta: lem.pasta, criadoEm: t, atualizadoEm: t, concluidoEm: null });
+      marcarAlterado();
+      redesenhar(); // o formulário continua aberto para adicionar outro
+    } else {
+      const nome = f.nome.value.trim();
+      if (!nome) return;
+      if (editando) Object.assign(editando, { nome, cor, atualizadoEm: t });
+      else d.pastasLembretes.push({ id: novoId("pastalem"), nome, cor, criadoEm: t, atualizadoEm: t });
+      lem.form = null;
+      lem.editandoPasta = null;
+      marcarAlterado();
+      redesenhar();
+    }
   });
   caixa.querySelector("details.concluidos")?.addEventListener("toggle", (e) => gravarLS("caderno.concluidos", e.target.open ? "1" : "0"));
+
   caixa.onchange = (e) => {
-    const d = e.target.dataset;
-    const l = estado.dados.lembretes.find((x) => x.id === (d.concluir || d.reabrir));
+    const ds = e.target.dataset;
+    const l = d.lembretes.find((x) => x.id === (ds.concluir || ds.reabrir));
     if (!l) return;
-    l.concluidoEm = d.concluir ? agora() : null;
+    l.concluidoEm = ds.concluir ? agora() : null;
     l.atualizadoEm = agora();
     marcarAlterado();
-    setTimeout(() => montarLembretes(caixa), d.concluir ? 250 : 0); // deixa ver o "check" antes de mover
+    setTimeout(redesenhar, ds.concluir ? 250 : 0); // deixa ver o "check" antes de mover
   };
-  caixa.querySelectorAll("[data-excluir]").forEach((b) => b.addEventListener("click", () => {
-    const l = estado.dados.lembretes.find((x) => x.id === b.dataset.excluir);
-    if (!l || !confirm(`Excluir de vez o lembrete “${l.texto}”?`)) return;
-    estado.dados.lembretes = estado.dados.lembretes.filter((x) => x.id !== l.id);
-    estado.dados.removidos[l.id] = agora();
-    marcarAlterado();
-    montarLembretes(caixa);
-  }));
+
+  caixa.onclick = (e) => {
+    const b = e.target.closest("[data-lem], [data-lem-pasta], [data-excluir]");
+    if (!b) return;
+    if (b.dataset.lemPasta) {
+      Object.assign(lem, { pasta: b.dataset.lemPasta, form: null, editandoPasta: null });
+      return redesenhar();
+    }
+    if (b.dataset.excluir) {
+      const l = d.lembretes.find((x) => x.id === b.dataset.excluir);
+      if (!l || !confirm(`Excluir de vez o lembrete “${l.texto}”?`)) return;
+      d.lembretes = d.lembretes.filter((x) => x.id !== l.id);
+      d.removidos[l.id] = agora();
+      marcarAlterado();
+      return redesenhar();
+    }
+    switch (b.dataset.lem) {
+      case "voltar": Object.assign(lem, { pasta: null, form: null, editandoPasta: null }); break;
+      case "nova-pasta": Object.assign(lem, { form: "pasta", editandoPasta: null }); break;
+      case "novo-lembrete": Object.assign(lem, { form: "lembrete", editandoPasta: null }); break;
+      case "cancelar": Object.assign(lem, { form: null, editandoPasta: null }); break;
+      case "editar-pasta": Object.assign(lem, { form: null, editandoPasta: lem.pasta }); break;
+      case "excluir-pasta": {
+        const n = d.lembretes.filter((l) => l.pasta === pasta.id).length;
+        if (!confirm(`Excluir de vez a pasta “${pasta.nome}”${n ? ` e ${plural(n, "lembrete", "lembretes")} dentro dela` : ""}?`)) return;
+        const t = agora();
+        for (const l of d.lembretes) if (l.pasta === pasta.id) d.removidos[l.id] = t;
+        d.lembretes = d.lembretes.filter((l) => l.pasta !== pasta.id);
+        d.pastasLembretes = d.pastasLembretes.filter((p) => p.id !== pasta.id);
+        d.removidos[pasta.id] = t;
+        lem.pasta = null;
+        marcarAlterado();
+        break;
+      }
+      default: return;
+    }
+    redesenhar();
+  };
 }
 
 function paginaPasta(el) {
@@ -1403,7 +1528,7 @@ function configurarDialogoConfig() {
       const b = JSON.parse(await arquivo.text());
       if (b.formato !== "caderno-backup" || !Array.isArray(b.pastas) || !Array.isArray(b.textos)) throw new Error("Este arquivo não é um backup do Caderno.");
       if (!confirm(`Juntar o backup (${b.pastas.length} cadernos, ${b.textos.length} textos) ao que já existe? Em textos repetidos, vale a versão editada por último.`)) return;
-      const importados = { pastas: b.pastas, textos: b.textos, lembretes: b.lembretes || [], removidos: {} };
+      const importados = { pastas: b.pastas, textos: b.textos, lembretes: b.lembretes || [], pastasLembretes: b.pastasLembretes || [], removidos: {} };
       migrar(importados);
       estado.dados = mesclarDados(estado.dados, importados);
       marcarAlterado();
