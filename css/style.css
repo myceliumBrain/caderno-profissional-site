@@ -291,23 +291,45 @@ legend { font-weight: 600; font-size: .9rem; padding: 0 .3rem; }
   gap: 1.25rem;
 }
 .cartao-pasta {
-  display: flex; flex-direction: column; align-items: flex-start; gap: .35rem;
-  min-height: 190px;
-  padding: 1.5rem;
-  text-align: left;
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35rem;
+  height: 190px; overflow: hidden;
+  padding: 1.25rem 1.5rem;
+  text-align: center;
   background: var(--painel);
   border: 1px solid var(--borda);
   border-radius: 16px;
   box-shadow: var(--sombra);
   cursor: pointer;
+  color: var(--texto); font: inherit;
   transition: transform .12s ease, border-color .12s ease;
 }
-.cartao-pasta:hover { transform: translateY(-2px); border-color: var(--acento); }
+.cartao-pasta:hover, .cartao-pasta:focus-visible { transform: translateY(-2px); border-color: var(--acento); }
 .cartao-icone { font-size: 2.2rem; line-height: 1; margin-bottom: .4rem; }
-.cartao-nome { font: 600 1.3rem/1.25 var(--ui); letter-spacing: -.01em; }
+.cartao-nome { font: 600 1.3rem/1.25 var(--ui); letter-spacing: -.01em; transition: font-size .3s ease; }
 .cartao-meta { font-size: .85rem; color: var(--suave); }
-.cartao-recentes { list-style: none; margin: .6rem 0 0; padding: .6rem 0 0; border-top: 1px solid var(--borda); width: 100%; display: grid; gap: .2rem; }
-.cartao-recentes li { font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Títulos dos textos: aparecem suavemente ao passar o cursor */
+.cartao-textos {
+  list-style: none; margin: 0; padding: 0; width: 100%;
+  display: grid; gap: .1rem;
+  max-height: 0; opacity: 0;
+  transition: max-height .35s ease, opacity .3s ease, margin .35s ease;
+}
+.cartao-textos li { font-size: .84rem; color: var(--suave); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cartao-textos li.mais { font-style: italic; }
+.cartao-pasta:hover .cartao-textos, .cartao-pasta:focus-visible .cartao-textos { max-height: 6.5rem; opacity: 1; margin-top: .35rem; }
+.cartao-pasta:hover .cartao-nome, .cartao-pasta:focus-visible .cartao-nome { font-size: 1.12rem; }
+/* com "mais informações" aberto sobra menos espaço no cartão */
+.cartao-pasta.info-aberta:hover .cartao-textos, .cartao-pasta.info-aberta:focus-visible .cartao-textos { max-height: 3.4rem; }
+.cartao-mais {
+  border: 0; background: none; color: var(--suave); font: 500 .76rem var(--ui); cursor: pointer;
+  padding: .1rem .4rem; border-radius: 6px;
+}
+.cartao-mais:hover { color: var(--acento); background: var(--painel-2); }
+@media (hover: none) {
+  /* Sem cursor (celular): os títulos aparecem com "mais informações". */
+  .cartao-pasta.info-aberta .cartao-textos { max-height: 6.5rem; opacity: 1; margin-top: .35rem; }
+}
 .cartao-pasta.nova, .cartao-pasta.lixeira { border-style: dashed; box-shadow: none; background: transparent; justify-content: center; align-items: center; color: var(--suave); }
 .cartao-pasta.nova .cartao-nome, .cartao-pasta.lixeira .cartao-nome { font-size: 1.05rem; font-weight: 500; }
 .cartao-pasta.lixeira:hover { border-color: var(--perigo-borda); }
@@ -613,7 +635,7 @@ dialog form label { width: 100%; }
   .pagina { padding-top: 1.25rem; }
   .pagina-topo h1 { font-size: 1.5rem; }
   .pagina-topo input[type=search] { max-width: none; }
-  .cartao-pasta { min-height: 0; }
+  .cartao-pasta { height: auto; min-height: 150px; }
   .folha { padding: 1.5rem 16px 2rem; border-radius: 0; border-left: 0; border-right: 0; margin: 0 -16px; }
   .pagina-texto { padding-left: 16px; padding-right: 16px; }
   #app input.titulo-texto { font-size: 1.6rem; }
@@ -900,6 +922,12 @@ button.anexo:hover { border-color: var(--acento); }
 .ev.lim { background: var(--cor); color: var(--painel); font-weight: 600; }
 .ev.feito { opacity: .45; text-decoration: line-through; }
 .ev-mais { font-size: .58rem; color: var(--suave); padding-left: .2rem; }
+.cal-grade.semana .dia { min-height: 4.4rem; }
+.cal-expandir {
+  display: block; margin: .45rem auto 0; border: 0; background: none; color: var(--acento);
+  font: 500 .78rem var(--ui); cursor: pointer; padding: .15rem .4rem; border-radius: 6px;
+}
+.cal-expandir:hover { background: var(--painel-2); }
 .cal-legenda { display: flex; gap: .9rem; justify-content: center; margin-top: .45rem; font-size: .72rem; color: var(--suave); }
 .cal-legenda .ev { display: inline-block; font-size: .65rem; padding: 0 .3rem; }
 .cal-dia { margin-top: .7rem; padding: .6rem .7rem; border-radius: 10px; background: var(--painel-2); font-size: .85rem; }

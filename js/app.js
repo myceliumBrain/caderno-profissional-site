@@ -573,16 +573,21 @@ function itemGrande(t, comPasta = false) {
 }
 
 function paginaInicio(el) {
+  // Cartão: só o nome, centralizado. Passando o cursor, aparecem os títulos dos
+  // textos (do mais recente ao mais antigo); "mais informações +" mostra o resto.
+  const MAX_TITULOS = 4;
   const cartoes = pastasAtivas().map((p) => {
     const textos = textosDaPasta(p.id);
-    const recentes = textos.slice(0, 3).map((t) => `<li>${icone(t)} ${esc(t.titulo || "Sem título")}</li>`).join("");
+    const aberta = infoAberta.has(p.id);
+    const titulos = textos.slice(0, MAX_TITULOS).map((t) => `<li>${esc(t.titulo || "Sem título")}</li>`).join("")
+      + (textos.length > MAX_TITULOS ? `<li class="mais">+ ${plural(textos.length - MAX_TITULOS, "texto", "textos")}</li>` : "");
     return `
-      <button class="cartao-pasta" data-pasta="${esc(p.id)}">
-        <span class="cartao-icone">📓</span>
+      <div class="cartao-pasta${aberta ? " info-aberta" : ""}" data-pasta="${esc(p.id)}" role="button" tabindex="0" aria-label="Abrir o caderno ${esc(p.nome)}">
         <span class="cartao-nome">${esc(p.nome)}</span>
-        <span class="cartao-meta">${plural(textos.length, "texto", "textos")}${textos[0] ? ` · editado ${esc(quando(textos[0].atualizadoEm))}` : ""}</span>
-        ${recentes ? `<ul class="cartao-recentes">${recentes}</ul>` : ""}
-      </button>`;
+        <ul class="cartao-textos" aria-label="Textos">${titulos || `<li class="mais">nenhum texto ainda</li>`}</ul>
+        ${aberta ? `<span class="cartao-meta">${plural(textos.length, "texto", "textos")}${textos[0] ? ` · editado ${esc(quando(textos[0].atualizadoEm))}` : ""}</span>` : ""}
+        <button type="button" class="cartao-mais" data-info="${esc(p.id)}" aria-expanded="${aberta}">mais informações ${aberta ? "−" : "+"}</button>
+      </div>`;
   }).join("");
   const n = totalNaLixeira();
   el.innerHTML = `
@@ -606,6 +611,9 @@ function paginaInicio(el) {
       <aside class="lembretes" id="lembretes" aria-label="Lembretes"></aside>
     </div>`;
   montarLembretes(el.querySelector("#lembretes"));
+  el.querySelectorAll("div.cartao-pasta[data-pasta]").forEach((c) => c.addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && e.target === c) { e.preventDefault(); c.click(); }
+  }));
   el.querySelector("#busca-inicio").addEventListener("input", (e) => {
     clearTimeout(timerBusca);
     timerBusca = setTimeout(() => { buscar(e.target.value); requestAnimationFrame(() => $("#busca").focus()); }, 250);
@@ -636,7 +644,7 @@ const rotuloCor = (c) => CORES_LEMBRETE.find((x) => x.id === c)?.rotulo || "";
 const lem = {
   pasta: null, form: null, editando: null, editandoPasta: null,
   campos: {}, arquivos: [], remover: new Set(), focar: false, enviando: false, erro: "",
-  mes: null, dia: null, destaque: null, abertos: new Set(),
+  mes: null, semana: null, dia: null, destaque: null, abertos: new Set(),
 };
 
 const diaMes = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
@@ -903,6 +911,12 @@ function dataAtiva(l) {
   return null;
 }
 
+// Ordem dos lembretes (e das pastas): a data ativa (previsão ou limite) mais
+// próxima em cima — atrasados primeiro; sem data, no fim.
+const prazoDe = (l) => dataAtiva(l)?.data || null;
+const compararPrazos = (a, b) => (a && b ? a.localeCompare(b) : a ? -1 : b ? 1 : 0);
+const porPrazo = (a, b) => compararPrazos(prazoDe(a), prazoDe(b)) || (a.criadoEm || "").localeCompare(b.criadoEm || "");
+
 // Fechado, o lembrete mostra só título, data ativa e ✎; a setinha abaixo do
 // título abre descrição, anexos, categoria e as duas datas.
 function itemLembrete(l, feito) {
@@ -942,13 +956,27 @@ function itemLembrete(l, feito) {
 
 // Calendário do mês, como numa agenda: cada lembrete aparece no dia da
 // previsão (fundo claro) e no dia da data limite (cor cheia).
+// Domingo da semana de uma data ISO.
+function inicioDaSemana(iso) {
+  const [a, m, d] = iso.split("-").map(Number);
+  const x = new Date(a, m - 1, d);
+  return dataISO(new Date(a, m - 1, d - x.getDay()));
+}
+const somarDias = (iso, n) => { const [a, m, d] = iso.split("-").map(Number); return dataISO(new Date(a, m - 1, d + n)); };
+const calendarioExpandido = () => lerLS("caderno.calExpandido") === "1";
+
+// Recolhido (padrão): só a semana atual. Expandido: o mês inteiro.
 function calendarioHtml() {
   const hoje = dataISO();
+  const expandido = calendarioExpandido();
   const mes = lem.mes || hoje.slice(0, 7);
   const [a, m] = mes.split("-").map(Number);
   const primeiro = new Date(a, m - 1, 1);
-  const inicio = new Date(a, m - 1, 1 - primeiro.getDay());
-  const semanas = Math.ceil((primeiro.getDay() + new Date(a, m, 0).getDate()) / 7);
+  const semana = lem.semana || inicioDaSemana(hoje);
+  const [sa, sm, sd] = semana.split("-").map(Number);
+  const inicio = expandido ? new Date(a, m - 1, 1 - primeiro.getDay()) : new Date(sa, sm - 1, sd);
+  const semanas = expandido ? Math.ceil((primeiro.getDay() + new Date(a, m, 0).getDate()) / 7) : 1;
+  const maxEv = expandido ? 2 : 3;
   const eventos = {};
   for (const l of estado.dados.lembretes) {
     if (l.previsao) (eventos[l.previsao] ||= []).push({ l, tipo: "prev" });
@@ -961,27 +989,38 @@ function calendarioHtml() {
     const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i);
     const iso = dataISO(d);
     const lista = eventos[iso] || [];
-    const classes = ["dia", d.getMonth() !== m - 1 && "fora", iso === hoje && "hoje", iso === lem.dia && "sel"].filter(Boolean).join(" ");
+    const classes = ["dia", expandido && d.getMonth() !== m - 1 && "fora", iso === hoje && "hoje", iso === lem.dia && "sel"].filter(Boolean).join(" ");
     dias += `<button type="button" class="${classes}" data-dia="${iso}" aria-label="${esc(dataLonga(iso))}${lista.length ? `, ${plural(lista.length, "lembrete", "lembretes")}` : ""}">
       <span class="num">${d.getDate()}</span>
-      ${lista.slice(0, 2).map(ev).join("")}
-      ${lista.length > 2 ? `<span class="ev-mais">+${lista.length - 2}</span>` : ""}
+      ${lista.slice(0, maxEv).map(ev).join("")}
+      ${lista.length > maxEv ? `<span class="ev-mais">+${lista.length - maxEv}</span>` : ""}
     </button>`;
   }
-  const titulo = primeiro.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  let titulo = primeiro.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  if (!expandido) {
+    const fim = somarDias(semana, 6);
+    const [, m1, d1] = semana.split("-").map(Number);
+    const [a2, m2, d2] = fim.split("-").map(Number);
+    const nomeMes = (mm) => new Date(2000, mm - 1, 1).toLocaleDateString("pt-BR", { month: "long" });
+    const ano = a2 === new Date().getFullYear() ? "" : ` de ${a2}`;
+    titulo = m1 === m2 ? `${d1} a ${d2} de ${nomeMes(m2)}${ano}` : `${d1} de ${nomeMes(m1).slice(0, 3)}. a ${d2} de ${nomeMes(m2).slice(0, 3)}.${ano}`;
+  }
+  const nav = expandido ? "mes" : "semana";
+  const unidade = expandido ? "Mês" : "Semana";
   const doDia = lem.dia ? eventos[lem.dia] || [] : [];
   return `
     <section class="calendario" aria-label="Calendário dos lembretes">
       <div class="cal-topo">
-        <button type="button" class="cal-nav" data-mes="-1" title="Mês anterior" aria-label="Mês anterior">‹</button>
+        <button type="button" class="cal-nav" data-${nav}="-1" title="${unidade} anterior" aria-label="${unidade} anterior">‹</button>
         <strong class="cal-titulo">${esc(titulo.charAt(0).toUpperCase() + titulo.slice(1))}</strong>
-        <button type="button" class="cal-nav" data-mes="1" title="Próximo mês" aria-label="Próximo mês">›</button>
-        <button type="button" class="cal-hoje" data-mes="0">Hoje</button>
+        <button type="button" class="cal-nav" data-${nav}="1" title="${expandido ? "Próximo mês" : "Próxima semana"}" aria-label="${expandido ? "Próximo mês" : "Próxima semana"}">›</button>
+        <button type="button" class="cal-hoje" data-${nav}="0">Hoje</button>
       </div>
-      <div class="cal-grade">
+      <div class="cal-grade${expandido ? "" : " semana"}">
         ${["D", "S", "T", "Q", "Q", "S", "S"].map((x) => `<span class="cal-sem">${x}</span>`).join("")}
         ${dias}
       </div>
+      <button type="button" class="cal-expandir" data-cal-expandir>${expandido ? "▴ Mostrar só a semana" : "▾ Expandir o calendário"}</button>
       <div class="cal-legenda"><span><span class="ev prev cor-nenhuma">&nbsp;&nbsp;&nbsp;</span> previsão</span><span><span class="ev lim cor-nenhuma">&nbsp;&nbsp;&nbsp;</span> data limite</span></div>
       ${lem.dia ? `
       <div class="cal-dia">
@@ -1031,12 +1070,15 @@ function montarLembretes(caixa) {
   const pasta = lem.pasta && d.pastasLembretes.find((p) => p.id === lem.pasta);
   if (!pasta) lem.pasta = null;
   const daqui = d.lembretes.filter((l) => pastaDoLembrete(l, ids) === lem.pasta);
-  const pendentes = daqui.filter((l) => !l.concluidoEm)
-    .sort((a, b) => (alertaDe(b)?.nivel || 0) - (alertaDe(a)?.nivel || 0) || (a.criadoEm || "").localeCompare(b.criadoEm || ""));
+  const pendentes = daqui.filter((l) => !l.concluidoEm).sort(porPrazo);
   const concluidos = daqui.filter((l) => l.concluidoEm)
     .sort((a, b) => b.concluidoEm.localeCompare(a.concluidoEm));
   const pendentesDa = (id) => d.lembretes.filter((l) => l.pasta === id && !l.concluidoEm).length;
-  const pastas = pasta ? [] : [...d.pastasLembretes].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  const prazoDaPasta = (id) => d.lembretes.filter((l) => l.pasta === id && !l.concluidoEm).map(prazoDe).filter(Boolean).sort()[0] || null;
+  const pastas = pasta ? [] : [...d.pastasLembretes]
+    .map((p) => ({ p, prazo: prazoDaPasta(p.id) }))
+    .sort((x, y) => compararPrazos(x.prazo, y.prazo) || x.p.nome.localeCompare(y.p.nome, "pt-BR"))
+    .map((x) => x.p);
   const abertos = lerLS("caderno.concluidos") === "1" || concluidos.some((l) => l.id === lem.editando);
 
   const form = lem.form === "lembrete" ? formLembrete() : (lem.form === "pasta" || lem.editandoPasta) ? formPasta() : "";
@@ -1228,9 +1270,24 @@ function montarLembretes(caixa) {
       }
       return redesenhar();
     }
+    if (ds.semana !== undefined) {
+      const n = Number(ds.semana);
+      if (n === 0) { lem.semana = null; lem.dia = dataISO(); }
+      else lem.semana = somarDias(lem.semana || inicioDaSemana(dataISO()), 7 * n);
+      return redesenhar();
+    }
+    if (ds.calExpandir !== undefined) {
+      const expandir = !calendarioExpandido();
+      gravarLS("caderno.calExpandido", expandir ? "1" : "0");
+      // Mantém o período: o mês da semana mostrada / a semana do dia escolhido (ou de hoje).
+      if (expandir) lem.mes = (lem.dia || somarDias(lem.semana || inicioDaSemana(dataISO()), 3)).slice(0, 7);
+      else lem.semana = lem.dia ? inicioDaSemana(lem.dia) : null;
+      return redesenhar();
+    }
     if (ds.dia) {
       lem.dia = lem.dia === ds.dia ? null : ds.dia;
       if (lem.dia && lem.dia.slice(0, 7) !== (lem.mes || dataISO().slice(0, 7))) lem.mes = lem.dia.slice(0, 7);
+      if (lem.dia) lem.semana = inicioDaSemana(lem.dia);
       return redesenhar();
     }
     if (ds.ir) return irParaLembrete(ds.ir);
