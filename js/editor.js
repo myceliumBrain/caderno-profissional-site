@@ -8,7 +8,7 @@
 // Tags e atributos aceitos no conteúdo.
 const TAGS = ["p", "br", "h2", "h3", "strong", "b", "em", "i", "u", "small", "sub", "sup",
   "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "hr", "span"];
-const ATRIBUTOS = ["href", "style", "class", "data-feito", "data-nova", "data-nota", "colspan", "rowspan", "target", "rel"];
+const ATRIBUTOS = ["href", "style", "class", "data-feito", "data-nova", "data-nota", "data-grupo", "colspan", "rowspan", "target", "rel"];
 
 export function limparHtml(html) {
   if (!window.DOMPurify) return html || "";
@@ -83,7 +83,84 @@ function estaVazio(el) {
 
 function atualizarVazio(el) {
   el.classList.toggle("vazio", estaVazio(el));
-  el.classList.toggle("com-notas", !!el.querySelector("span.nota"));
+}
+
+// ── Notas na margem ──
+// Uma nota pode cobrir várias linhas e parágrafos: cada pedaço do texto fica
+// num <span class="nota" data-nota="…" data-grupo="…">, e os pedaços do mesmo
+// grupo viram UMA barra na margem (da primeira à última linha), com o texto
+// da nota escrito uma vez só. Notas antigas, sem grupo, juntam-se quando
+// pedaços seguidos têm o mesmo texto.
+export function gruposDeNotas(raiz) {
+  const grupos = new Map();
+  let anterior = null;
+  raiz.querySelectorAll("span.nota").forEach((s, i) => {
+    let chave = s.dataset.grupo;
+    if (!chave) {
+      chave = anterior && !anterior.dataset.grupo && anterior.dataset.nota === s.dataset.nota ? anterior._grupo : `solto-${i}`;
+    }
+    s._grupo = chave;
+    if (!grupos.has(chave)) grupos.set(chave, []);
+    grupos.get(chave).push(s);
+    anterior = s;
+  });
+  return [...grupos.values()];
+}
+
+// Desenha as barras e os textos das notas na camada ao lado do texto.
+export function desenharNotas(rt, camada) {
+  const doc = camada.ownerDocument;
+  camada.innerHTML = "";
+  const grupos = gruposDeNotas(rt);
+  rt.classList.toggle("com-notas", grupos.length > 0);
+  if (!grupos.length) return;
+  const base = camada.getBoundingClientRect().top;
+  const posicoes = grupos.map((partes) => {
+    let topo = Infinity, fundo = -Infinity;
+    for (const p of partes) {
+      for (const r of p.getClientRects()) {
+        if (!r.width && !r.height) continue;
+        topo = Math.min(topo, r.top);
+        fundo = Math.max(fundo, r.bottom);
+      }
+    }
+    return { partes, topo: topo - base, fundo: fundo - base };
+  }).filter((g) => Number.isFinite(g.topo)).sort((a, b) => a.topo - b.topo);
+  let fimTexto = -Infinity;
+  for (const g of posicoes) {
+    const barra = doc.createElement("div");
+    barra.className = "nota-barra";
+    barra.style.top = `${g.topo}px`;
+    barra.style.height = `${Math.max(g.fundo - g.topo, 8)}px`;
+    const texto = doc.createElement("div");
+    texto.className = "nota-texto";
+    texto.textContent = g.partes[0].dataset.nota || "";
+    texto.style.top = `${Math.max(g.topo, fimTexto + 4)}px`; // não deixa uma nota cobrir a outra
+    texto._partes = g.partes;
+    camada.append(barra, texto);
+    fimTexto = parseFloat(texto.style.top) + texto.offsetHeight;
+  }
+}
+
+// Muda o texto de uma nota (todos os pedaços) ou, se vazio, tira a nota.
+function editarNota(partes) {
+  const texto = prompt("Nota na margem (deixe vazio para apagar a nota):", partes[0].dataset.nota || "");
+  if (texto === null) return false;
+  for (const p of partes) {
+    if (texto.trim()) {
+      p.dataset.nota = texto.trim();
+    } else {
+      const pai = p.parentNode;
+      while (p.firstChild) pai.insertBefore(p.firstChild, p);
+      p.remove();
+      pai.normalize();
+    }
+  }
+  return true;
+}
+
+function partesDaNota(span, raiz) {
+  return gruposDeNotas(raiz).find((g) => g.includes(span)) || [span];
 }
 
 // Transforma um elemento em editor. Devolve funções para mudar o modo.
@@ -96,11 +173,38 @@ export function montarEditor(el, { html, editavel, placeholder, aoMudar }) {
   definirEditavel(editavel);
   atualizarVazio(el);
 
+  // Moldura com a camada das notas na margem direita.
+  let camada = el.parentElement?.classList.contains("rt-moldura") ? el.nextElementSibling : null;
+  if (!camada) {
+    const moldura = document.createElement("div");
+    moldura.className = "rt-moldura";
+    el.before(moldura);
+    camada = document.createElement("div");
+    camada.className = "rt-notas";
+    camada.setAttribute("aria-hidden", "true");
+    moldura.append(el, camada);
+  }
+  let quadro = 0;
+  const redesenharNotas = () => {
+    cancelAnimationFrame(quadro);
+    quadro = requestAnimationFrame(() => desenharNotas(el, camada));
+  };
+  new ResizeObserver(redesenharNotas).observe(el);
+  document.fonts?.ready.then(redesenharNotas);
+  redesenharNotas();
+
   const avisar = () => {
     atualizarVazio(el);
+    redesenharNotas();
     aoMudar(estaVazio(el) ? "" : normalizar(el.innerHTML));
   };
   el.addEventListener("input", avisar);
+  // Clicar no texto de uma nota (modo Escrever) edita ou apaga a nota.
+  camada.addEventListener("click", (e) => {
+    const t = e.target.closest(".nota-texto");
+    if (!t || el.contentEditable !== "true") return;
+    if (editarNota(t._partes)) avisar();
+  });
   el.addEventListener("focus", () => {
     editorAtivo = el;
     try { document.execCommand("defaultParagraphSeparator", false, "p"); } catch {}
@@ -242,36 +346,52 @@ function alternarPassos() {
   }
 }
 
-// ── Notas na margem ──
-// As palavras ficam em <span class="nota" data-nota="*">; a nota aparece na
-// margem direita, na altura da linha (no celular, como sobrescrito).
+// ── Botão "✱ Nota" ──
 function alternarNota() {
   const s = sel();
   if (!s.rangeCount) return;
   const r = s.getRangeAt(0);
-  const atual = elementoDe(r.commonAncestorContainer)?.closest("span.nota");
-  if (atual && editorAtivo.contains(atual)) {
-    const texto = prompt("Nota na margem (deixe vazio para apagar a nota):", atual.dataset.nota || "");
-    if (texto === null) return;
-    if (texto.trim()) { atual.dataset.nota = texto.trim(); return; }
-    const pai = atual.parentNode;
-    while (atual.firstChild) pai.insertBefore(atual.firstChild, atual);
-    atual.remove();
+  const atual = elementoDe(r.startContainer)?.closest("span.nota");
+  if (atual && editorAtivo.contains(atual) && (r.collapsed || atual.contains(r.endContainer))) {
+    editarNota(partesDaNota(atual, editorAtivo));
     return;
   }
   if (r.collapsed || !r.toString().trim()) {
-    alert("Selecione as palavras que vão receber a nota.");
+    alert("Selecione as palavras (podem ser várias linhas) que vão receber a nota.");
     return;
   }
   const texto = prompt("Nota na margem para o trecho selecionado (ex.: *, 2x, repetido):", "*");
   if (!texto?.trim()) return;
-  const span = document.createElement("span");
-  span.className = "nota";
-  span.dataset.nota = texto.trim();
-  span.appendChild(r.extractContents());
-  span.querySelectorAll("p, h2, h3, li").forEach((b) => b.replaceWith(...b.childNodes, " ")); // nota fica dentro de uma linha
-  r.insertNode(span);
-  s.selectAllChildren(span);
+  // Envolve cada pedaço de texto da seleção, sem quebrar parágrafos nem listas.
+  const raiz = r.commonAncestorContainer.nodeType === 3 ? r.commonAncestorContainer.parentNode : r.commonAncestorContainer;
+  const { startContainer: ini, startOffset: oIni, endContainer: fim, endOffset: oFim } = r;
+  const andar = document.createTreeWalker(raiz, NodeFilter.SHOW_TEXT);
+  const nos = [];
+  while (andar.nextNode()) if (r.intersectsNode(andar.currentNode)) nos.push(andar.currentNode);
+  const grupo = `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  let ultimo = null;
+  for (const n of nos) {
+    if (n.parentElement.closest("span.nota")) continue; // já tem nota
+    const a = n === ini ? oIni : 0;
+    const b = n === fim ? oFim : n.length;
+    if (a >= b || !n.data.slice(a, b).trim()) continue;
+    if (b < n.length) n.splitText(b);
+    const pedaco = a > 0 ? n.splitText(a) : n;
+    const span = document.createElement("span");
+    span.className = "nota";
+    span.dataset.nota = texto.trim();
+    span.dataset.grupo = grupo;
+    pedaco.replaceWith(span);
+    span.appendChild(pedaco);
+    ultimo = span;
+  }
+  if (ultimo) {
+    const depois = document.createRange();
+    depois.setStartAfter(ultimo);
+    depois.collapse(true);
+    s.removeAllRanges();
+    s.addRange(depois);
+  }
 }
 
 // ── Caixa com bordas (comentários) ──

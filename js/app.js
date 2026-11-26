@@ -535,21 +535,31 @@ function renderizarPrincipal() {
 }
 
 // Cartão de um texto: clicar abre em Ler; os botões ao lado escolhem o modo.
+// Datas de edição/execução e o resumo (no contínuo, o "Sobre") ficam
+// escondidos em "mais informações +".
+const infoAberta = new Set();
+
 function itemGrande(t, comPasta = false) {
   const r = resumo(t);
-  const periodo = t.tipo === "diario" ? periodoDoDiario(t) : "";
+  const diario = t.tipo === "diario";
+  const periodo = diario ? periodoDoDiario(t) : "";
+  const nEntradas = diario ? entradasAtivas(t).length : 0;
+  const aberta = infoAberta.has(t.id);
+  const meta = metaDoTexto(t, comPasta).split(" · ").filter((x) => !/^\d+ entradas?$/.test(x)).join(" · ");
   return `
-    <li class="item-cartao">
-      <button class="item-grande" data-texto="${esc(t.id)}" data-abrir="ler" title="Abrir para ler">
-        <span class="item-icone">${icone(t)}</span>
-        <span class="item-corpo">
-          <span class="item-titulo">${esc(t.titulo || "Sem título")}</span>
-          <span class="item-meta">${esc(metaDoTexto(t, comPasta))}</span>
-          ${r ? `<span class="item-resumo">${t.tipo === "diario" ? `<strong>Sobre:</strong> ` : ""}${esc(r)}</span>` : ""}
-        </span>
-      </button>
+    <li class="item-cartao${aberta ? " info-aberta" : ""}" data-texto="${esc(t.id)}" data-abrir="ler" title="Abrir para ler">
+      <span class="item-icone">${icone(t)}</span>
+      <div class="item-corpo">
+        <button type="button" class="item-titulo" data-texto="${esc(t.id)}" data-abrir="ler">${esc(t.titulo || "Sem título")}</button>
+        <button type="button" class="item-mais" data-info="${esc(t.id)}" aria-expanded="${aberta}">${aberta ? "menos informações −" : "mais informações +"}</button>
+        ${aberta ? `
+        <div class="item-info">
+          <span class="item-meta">${esc(meta)}</span>
+          ${r ? `<span class="item-resumo">${diario ? `<strong>Sobre:</strong> ` : ""}${esc(r)}</span>` : ""}
+        </div>` : ""}
+      </div>
       <div class="item-lado">
-        ${periodo ? `<span class="item-periodo" title="Primeira e última entrada">${esc(periodo)}</span>` : ""}
+        ${diario ? `<span class="item-periodo" title="Primeira e última entrada">${periodo ? `${esc(periodo)} · ` : ""}${plural(nEntradas, "entrada", "entradas")}</span>` : ""}
         <span class="item-modos">
           <button type="button" class="botao pequeno" data-texto="${esc(t.id)}" data-abrir="ler">Ler</button>
           <button type="button" class="botao pequeno" data-texto="${esc(t.id)}" data-abrir="escrever">Escrever</button>
@@ -1697,6 +1707,13 @@ function configurarApp() {
       }
     }
     if (d.pasta) return abrirPasta(d.pasta);
+    if (d.info) {
+      if (!infoAberta.delete(d.info)) infoAberta.add(d.info);
+      const rolagem = $("#principal").scrollTop;
+      renderizarPrincipal();
+      $("#principal").scrollTop = rolagem;
+      return;
+    }
     if (d.texto && d.abrir) {
       estado.modo = d.abrir;
       gravarLS("caderno.modo", d.abrir);

@@ -1,6 +1,13 @@
 // Exportar um texto (ou um diário inteiro) como PDF, Word (.docx) ou .txt.
 
 import { esc, dataLonga, nomeDeArquivo, baixarArquivo, agora, datasDoTexto } from "./util.js";
+import { gruposDeNotas, desenharNotas } from "./editor.js";
+
+// Nota que cobre várias linhas: nas exportações em texto (.txt e Word), o
+// texto da nota vai uma vez só, depois do último pedaço.
+function marcarFimDasNotas(raiz) {
+  for (const partes of gruposDeNotas(raiz)) partes[partes.length - 1].dataset.fimNota = "1";
+}
 
 // Monta o documento: título + corpo; no diário, a descrição e as entradas
 // (fora da lixeira) em ordem cronológica, cada uma com data e hora.
@@ -36,12 +43,12 @@ const CSS_IMPRESSAO = `
   blockquote { margin: .8em 0; padding: .1em 1em; border-left: 2px solid #999; }
   blockquote.caixa { border: 1px solid #555; border-radius: 4pt; padding: .5em .8em; background: #f4f4f4; }
   blockquote.caixa > :last-child { margin-bottom: 0; }
-  body.com-notas { margin-right: 2.6cm; position: relative; }
+  .rt-moldura { position: relative; }
+  .rt.com-notas { margin-right: 3cm; }
   span.nota { text-decoration: underline dotted; }
-  span.nota::after {
-    content: attr(data-nota); position: absolute; left: calc(100% + .4cm); width: 2.2cm;
-    padding-left: .2cm; border-left: 1.5pt solid #555; font: bold 8.5pt/1.3 sans-serif; color: #333;
-  }
+  .rt-notas { position: absolute; top: 0; right: 0; bottom: 0; width: 2.6cm; }
+  .nota-barra { position: absolute; left: 0; width: 1.5pt; background: #555; }
+  .nota-texto { position: absolute; left: .2cm; right: 0; font: bold 8.5pt/1.3 sans-serif; color: #333; }
 `;
 
 // PDF: abre a janela de impressão só com o documento ("Salvar como PDF").
@@ -49,14 +56,17 @@ const CSS_IMPRESSAO = `
 export function exportarPdf(texto) {
   const { titulo, html, datas } = montar(texto);
   const iframe = document.createElement("iframe");
-  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+  // Mesma largura da área útil da folha A4, para as notas da margem ficarem
+  // na altura certa (fora da tela).
+  iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:170mm;height:1200px;border:0;opacity:0;pointer-events:none;";
   document.body.appendChild(iframe);
   const doc = iframe.contentDocument;
   doc.open();
   doc.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(nomeDeArquivo(titulo))}</title><style>${CSS_IMPRESSAO}</style></head>
-    <body class="${html.includes('class="nota"') ? "com-notas" : ""}"><h1>${esc(titulo)}</h1><p class="datas">${datas.map(([r, v]) => `<strong>${esc(r)}:</strong> ${esc(v)}`).join("<br>")}</p>${html}<p class="rodape">Exportado em ${esc(new Date().toLocaleString("pt-BR"))}</p></body></html>`);
+    <body><h1>${esc(titulo)}</h1><p class="datas">${datas.map(([r, v]) => `<strong>${esc(r)}:</strong> ${esc(v)}`).join("<br>")}</p><div class="rt-moldura"><div class="rt">${html}</div><div class="rt-notas"></div></div><p class="rodape">Exportado em ${esc(new Date().toLocaleString("pt-BR"))}</p></body></html>`);
   doc.close();
   setTimeout(() => {
+    desenharNotas(doc.querySelector(".rt"), doc.querySelector(".rt-notas"));
     iframe.contentWindow.focus();
     iframe.contentWindow.print();
     setTimeout(() => iframe.remove(), 60000);
@@ -74,7 +84,7 @@ function paraTexto(no) {
   const dentro = () => [...no.childNodes].map(paraTexto).join("");
   switch (tag) {
     case "BR": return "\n";
-    case "SPAN": return no.classList.contains("nota") ? `${dentro()} [${no.dataset.nota}]` : dentro();
+    case "SPAN": return no.dataset.fimNota ? `${dentro()} [${no.dataset.nota}]` : dentro();
     case "BLOCKQUOTE":
       if (no.classList.contains("caixa")) {
         const linhas = dentro().trim().replace(/\n{3,}/g, "\n\n").split("\n");
@@ -104,6 +114,7 @@ export function exportarTxt(texto) {
   const { titulo, html, datas } = montar(texto);
   const div = document.createElement("div");
   div.innerHTML = html;
+  marcarFimDasNotas(div);
   const corpo = paraTexto(div).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   const cabecalho = datas.map(([r, v]) => `${r}: ${v}`).join("\n");
   const conteudo = `${titulo}\n${"=".repeat(Math.min(titulo.length, 60))}\n${cabecalho}\n\n${corpo}\n`;
@@ -130,6 +141,7 @@ export async function exportarDocx(texto) {
   const { titulo, html, datas } = montar(texto);
   const div = document.createElement("div");
   div.innerHTML = html;
+  marcarFimDasNotas(div);
   let listasNumeradas = 0;
 
   const alinhamento = (el) => ({
@@ -157,7 +169,7 @@ export async function exportarDocx(texto) {
     if (tag === "SUP") g.sup = true;
     if (tag === "SUB") g.sub = true;
     const filhos = [...no.childNodes].flatMap((c) => runs(c, g));
-    if (tag === "SPAN" && no.classList.contains("nota")) {
+    if (tag === "SPAN" && no.dataset.fimNota) {
       filhos.push(new D.TextRun({ text: ` ${no.dataset.nota}`, bold: true, superScript: true, color: "444444" }));
     }
     return filhos;
