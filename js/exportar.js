@@ -1,6 +1,6 @@
 // Exportar um texto (ou um diário inteiro) como PDF, Word (.docx) ou .txt.
 
-import { esc, dataLonga, nomeDeArquivo, baixarArquivo, agora } from "./util.js";
+import { esc, dataLonga, nomeDeArquivo, baixarArquivo, agora, datasDoTexto } from "./util.js";
 
 // Monta o documento: título + corpo; no diário, a descrição e as entradas
 // (fora da lixeira) em ordem cronológica, cada uma com data e hora.
@@ -13,7 +13,7 @@ function montar(texto) {
     html += entradas.map((e, i) =>
       `<h2 class="entrada">Entrada nº ${i + 1} — ${esc(dataLonga(e.data))}, ${esc(e.hora)}</h2>${e.corpo || "<p></p>"}`).join("");
   }
-  return { titulo: texto.titulo || "Sem título", html };
+  return { titulo: texto.titulo || "Sem título", html, datas: datasDoTexto(texto) };
 }
 
 const CSS_IMPRESSAO = `
@@ -32,19 +32,20 @@ const CSS_IMPRESSAO = `
   ul.tarefas li::before { content: "☐  "; }
   ul.tarefas li[data-feito="true"]::before { content: "☑  "; }
   .rodape { margin-top: 2em; font-size: 9pt; color: #555; }
+  .datas { margin: -.6em 0 1.4em; font-size: 10pt; color: #333; line-height: 1.45; }
 `;
 
 // PDF: abre a janela de impressão só com o documento ("Salvar como PDF").
 // O texto do PDF fica selecionável e pesquisável.
 export function exportarPdf(texto) {
-  const { titulo, html } = montar(texto);
+  const { titulo, html, datas } = montar(texto);
   const iframe = document.createElement("iframe");
   iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
   document.body.appendChild(iframe);
   const doc = iframe.contentDocument;
   doc.open();
   doc.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(nomeDeArquivo(titulo))}</title><style>${CSS_IMPRESSAO}</style></head>
-    <body><h1>${esc(titulo)}</h1>${html}<p class="rodape">Exportado em ${esc(new Date().toLocaleString("pt-BR"))}</p></body></html>`);
+    <body><h1>${esc(titulo)}</h1><p class="datas">${datas.map(([r, v]) => `<strong>${esc(r)}:</strong> ${esc(v)}`).join("<br>")}</p>${html}<p class="rodape">Exportado em ${esc(new Date().toLocaleString("pt-BR"))}</p></body></html>`);
   doc.close();
   setTimeout(() => {
     iframe.contentWindow.focus();
@@ -84,11 +85,12 @@ function paraTexto(no) {
 }
 
 export function exportarTxt(texto) {
-  const { titulo, html } = montar(texto);
+  const { titulo, html, datas } = montar(texto);
   const div = document.createElement("div");
   div.innerHTML = html;
   const corpo = paraTexto(div).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
-  const conteudo = `${titulo}\n${"=".repeat(Math.min(titulo.length, 60))}\n\n${corpo}\n`;
+  const cabecalho = datas.map(([r, v]) => `${r}: ${v}`).join("\n");
+  const conteudo = `${titulo}\n${"=".repeat(Math.min(titulo.length, 60))}\n${cabecalho}\n\n${corpo}\n`;
   baixarArquivo(`${nomeDeArquivo(titulo)}.txt`, conteudo, "text/plain;charset=utf-8");
 }
 
@@ -109,7 +111,7 @@ function carregarDocx() {
 
 export async function exportarDocx(texto) {
   const D = await carregarDocx();
-  const { titulo, html } = montar(texto);
+  const { titulo, html, datas } = montar(texto);
   const div = document.createElement("div");
   div.innerHTML = html;
   let listasNumeradas = 0;
@@ -210,7 +212,14 @@ export async function exportarDocx(texto) {
     },
     sections: [{
       properties: { page: { margin: { top: 1418, bottom: 1418, left: 1134, right: 1134 } } },
-      children: [new D.Paragraph({ text: titulo, heading: D.HeadingLevel.TITLE }), ...[...div.childNodes].flatMap(blocos)],
+      children: [
+        new D.Paragraph({ text: titulo, heading: D.HeadingLevel.TITLE }),
+        ...datas.map(([r, v], i) => new D.Paragraph({
+          children: [new D.TextRun({ text: `${r}: `, bold: true, size: 20 }), new D.TextRun({ text: v, size: 20 })],
+          spacing: { after: i === datas.length - 1 ? 280 : 0 },
+        })),
+        ...[...div.childNodes].flatMap(blocos),
+      ],
     }],
   });
   const blob = await D.Packer.toBlob(doc);

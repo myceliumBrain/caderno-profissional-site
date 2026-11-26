@@ -72,3 +72,24 @@ export function baixarArquivo(nome, conteudo, tipo) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+
+// Dia de execução de um texto pontual (quando o trabalho foi feito de fato,
+// ex.: escrito à mão e passado para o caderno dias depois). Textos antigos,
+// sem esse campo, usam o dia em que foram criados.
+export function diaExecucao(t) {
+  return t.execucao || (t.criadoEm ? dataISO(new Date(t.criadoEm)) : null);
+}
+
+// "25/11/2026, 14:32"
+export function dataHora(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+// As datas que acompanham um texto (tela de leitura e exportações).
+export function datasDoTexto(t) {
+  const linhas = [];
+  if (t.tipo !== "diario" && diaExecucao(t)) linhas.push(["Dia de execução", dataLonga(diaExecucao(t))]);
+  linhas.push(["Criado em", dataHora(t.criadoEm)], ["Editado em", dataHora(t.atualizadoEm)]);
+  return linhas.filter(([, v]) => v);
+}

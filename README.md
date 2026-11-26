@@ -16,7 +16,10 @@ recuperação), os arquivos são ilegíveis.
 ## Como funciona
 
 - **Cadernos** em cartões grandes na tela inicial (“Meus cadernos”); dentro deles, dois tipos de texto:
-  - **Texto pontual**: um documento único (ex.: um protocolo).
+  - **Texto pontual**: um documento único (ex.: um protocolo), com **dia de execução**
+    (quando foi feito de fato, ex.: escrito à mão e passado para o caderno dias
+    depois) além de criado e editado. As três datas vão no modo Ler e nas
+    exportações (PDF, Word, .txt).
   - **Texto contínuo**: uma descrição opcional + **entradas com data e hora**, numeradas,
     numa linha do tempo (a mais recente no topo). Feito para a revisão de
     literatura em que você avança um pouco por dia.

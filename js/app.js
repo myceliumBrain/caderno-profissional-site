@@ -7,7 +7,7 @@ import { mesclarDados } from "./mesclar.js";
 import { CONFIG } from "./config.js";
 import {
   $, agora, novoId, esc, dataISO, horaISO, dataLonga, dataCurta, quando,
-  semAcento, textoDeHtml, plural, baixarArquivo,
+  semAcento, textoDeHtml, plural, baixarArquivo, diaExecucao, datasDoTexto,
 } from "./util.js";
 import { montarEditor, montarBarra, markdownParaHtml } from "./editor.js";
 import { exportarPdf, exportarTxt, exportarDocx } from "./exportar.js";
@@ -126,6 +126,11 @@ function migrar(d) {
       t.corpo = markdownParaHtml(t.corpo || "");
       for (const e of t.entradas || []) e.corpo = markdownParaHtml(e.corpo || "");
       t.formato = "html";
+      mudou = true;
+    }
+    // Texto pontual sem "dia de execução" (anterior a esse campo): o dia em que foi criado.
+    if (t.tipo !== "diario" && !t.execucao && t.criadoEm) {
+      t.execucao = diaExecucao(t);
       mudou = true;
     }
     for (const e of t.entradas || []) {
@@ -328,6 +333,7 @@ function resumo(t) {
 
 function metaDoTexto(t, comPasta = false) {
   const partes = [`editado ${quando(t.atualizadoEm)}`];
+  if (t.tipo !== "diario" && diaExecucao(t)) partes.unshift(`executado ${dataCurta(diaExecucao(t))}`);
   if (t.tipo === "diario") partes.push(plural(entradasAtivas(t).length, "entrada", "entradas"));
   if (comPasta) partes.push(`📓 ${pastaPorId(t.pastaId)?.nome || "?"}`);
   return partes.join(" · ");
@@ -1257,9 +1263,11 @@ function paginaTexto(el) {
         <div class="meta-texto" ${escrever ? "" : "hidden"}>
           <label>📓 <select id="mover-texto" ${naLixeira ? "disabled" : ""}>${opcoesPasta}</select></label>
           <span>${t.tipo === "diario" ? "📔 Texto contínuo" : "📄 Texto pontual"}</span>
+          ${t.tipo === "diario" ? "" : `<label title="Quando o trabalho foi feito de fato (ex.: escrito à mão antes de passar para o caderno)">🗓 dia de execução <input type="date" id="execucao-texto" value="${esc(diaExecucao(t) || "")}" ${naLixeira ? "disabled" : ""}></label>`}
           <span>criado ${esc(quando(t.criadoEm))}</span>
           <span>editado ${esc(quando(t.atualizadoEm))}</span>
         </div>
+        ${escrever ? "" : `<p class="datas-leitura">${datasDoTexto(t).map(([r, v]) => `<span><strong>${esc(r)}:</strong> ${esc(v)}</span>`).join("")}</p>`}
         ${t.tipo === "diario" ? (escrever ? `
           <details class="descricao" ${t.corpo ? "open" : ""}>
             <summary>Sobre</summary>
@@ -1281,6 +1289,11 @@ function paginaTexto(el) {
 
   const titulo = $("#titulo-texto");
   titulo.addEventListener("input", () => { t.titulo = titulo.value; tocarTexto(t); });
+  $("#execucao-texto")?.addEventListener("change", (e) => {
+    if (!e.target.value) { e.target.value = diaExecucao(t) || ""; return; } // não fica sem data
+    t.execucao = e.target.value;
+    tocarTexto(t);
+  });
   $("#mover-texto").addEventListener("change", (e) => {
     t.pastaId = e.target.value;
     estado.pastaAtual = t.pastaId;
@@ -1424,6 +1437,7 @@ function novoTexto(tipo) {
     id: novoId("texto"), pastaId, tipo, formato: "html",
     titulo: tipo === "diario" ? `Texto contínuo — ${new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}` : "",
     corpo: "", entradas: tipo === "diario" ? [] : undefined,
+    execucao: tipo === "diario" ? undefined : dataISO(),
     criadoEm: t, atualizadoEm: t,
   };
   estado.dados.textos.push(texto);
