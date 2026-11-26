@@ -708,22 +708,36 @@ button.anexo:hover { border-color: var(--acento); }
 
 /* Lista */
 .lista-lembretes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.lista-lembretes li { display: flex; align-items: flex-start; gap: .55rem; padding: .55rem .25rem; border-top: 1px solid var(--borda); transition: background .4s; }
+.lista-lembretes li { display: flex; flex-direction: column; padding: .55rem .25rem; border-top: 1px solid var(--borda); transition: background .4s; }
 .lista-lembretes li:first-child { border-top: 0; }
 .lista-lembretes li.editando { display: block; padding: .4rem 0; }
 .lista-lembretes li.editando .form-lembrete { margin: 0; }
 .lista-lembretes li[class*="cor-"] { box-shadow: inset 3px 0 0 var(--cor); padding-left: .55rem; }
 .lista-lembretes li.destaque { background: var(--acento-claro); }
-.lista-lembretes li > input[type=checkbox] { width: 1.05rem; height: 1.05rem; margin: .2rem 0 0; flex: none; accent-color: var(--cor, var(--acento)); cursor: pointer; }
-.lembrete-corpo { flex: 1; display: flex; flex-direction: column; min-width: 0; font-size: .92rem; }
-.lembrete-texto { overflow-wrap: anywhere; line-height: 1.4; font-weight: 500; }
+.lembrete-linha { display: flex; align-items: flex-start; gap: .55rem; }
+.lembrete-baixo { display: flex; flex-direction: column; padding-left: 1.6rem; font-size: .92rem; min-width: 0; }
+.lembrete-linha > input[type=checkbox] { width: 1.05rem; height: 1.05rem; margin: .2rem 0 0; flex: none; accent-color: var(--cor, var(--acento)); cursor: pointer; }
+.lembrete-texto { flex: 1; min-width: 0; font-size: .92rem; overflow-wrap: anywhere; line-height: 1.4; font-weight: 500; }
 .lembrete-desc { font-size: .82rem; color: var(--suave); white-space: pre-line; overflow-wrap: anywhere; line-height: 1.45; margin-top: .1rem; }
 .lembrete-meta { font-size: .74rem; color: var(--suave); display: flex; flex-wrap: wrap; align-items: center; gap: .15rem .4rem; margin-top: .15rem; }
 .data-lembrete { white-space: nowrap; }
 .data-lembrete.perto { color: var(--aviso); font-weight: 600; }
 .data-lembrete.urgente { color: var(--perigo); font-weight: 600; }
 .lista-lembretes li.feito .lembrete-texto { text-decoration: line-through; color: var(--suave); font-weight: 400; }
-.lembrete-acoes { display: flex; flex-direction: column; align-items: flex-end; gap: .3rem; flex: none; }
+.lembrete-acoes { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .15rem .3rem; flex: none; max-width: 50%; }
+.data-ativa {
+  font-size: .74rem; white-space: nowrap; color: var(--suave);
+  padding: .05rem .4rem; border-radius: 99px; background: var(--painel-2);
+}
+.data-ativa.nivel-1 { color: var(--aviso); background: var(--lem-amarelo-fundo); font-weight: 600; }
+.data-ativa.nivel-2 { color: var(--perigo); background: var(--perigo-fundo); font-weight: 600; }
+.abrir-detalhes {
+  align-self: flex-start; border: 0; background: none; padding: .05rem .1rem; margin-top: .05rem;
+  font-size: .74rem; color: var(--suave); cursor: pointer; border-radius: 4px;
+}
+.abrir-detalhes:hover { color: var(--texto); }
+.seta-detalhes { display: inline-block; width: .7rem; }
+.lembrete-detalhes { display: flex; flex-direction: column; gap: .15rem; margin: .15rem 0 0 .1rem; padding-left: .55rem; border-left: 2px solid var(--borda); }
 .editar-lembrete {
   border: 0; background: none; color: var(--suave); cursor: pointer;
   width: 1.6rem; height: 1.6rem; border-radius: 6px; font-size: .9rem; opacity: .55;

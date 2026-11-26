@@ -595,7 +595,7 @@ const rotuloCor = (c) => CORES_LEMBRETE.find((x) => x.id === c)?.rotulo || "";
 const lem = {
   pasta: null, form: null, editando: null, editandoPasta: null,
   campos: {}, arquivos: [], remover: new Set(), focar: false, enviando: false, erro: "",
-  mes: null, dia: null, destaque: null,
+  mes: null, dia: null, destaque: null, abertos: new Set(),
 };
 
 const diaMes = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
@@ -765,22 +765,47 @@ function datasDoLembrete(l) {
   return partes.join(" ");
 }
 
+// A data que vale agora, mostrada ao lado do título: a do alerta, se houver;
+// senão a previsão (enquanto não passou) e depois a data limite.
+function dataAtiva(l) {
+  const al = alertaDe(l);
+  if (al) return { tipo: al.nivel === 2 ? "limite" : "previsão", data: al.data, nivel: al.nivel };
+  if (l.previsao && (diasAte(l.previsao) >= 0 || !l.limite)) return { tipo: "previsão", data: l.previsao, nivel: 0 };
+  if (l.limite) return { tipo: "limite", data: l.limite, nivel: 0 };
+  return null;
+}
+
+// Fechado, o lembrete mostra só título, data ativa e ✎; a setinha abaixo do
+// título abre descrição, anexos, categoria e as duas datas.
 function itemLembrete(l, feito) {
   if (lem.editando === l.id) return `<li class="editando">${formLembrete()}</li>`;
   const cor = l.cor ? ` cor-${l.cor}` : "";
   const al = feito ? null : alertaDe(l);
+  const ativa = feito ? null : dataAtiva(l);
+  const aberto = lem.abertos.has(l.id);
+  const nAnexos = l.anexos?.length || 0;
+  const rotulo = l.descricao ? "descrição" : "detalhes";
   return `
     <li class="${feito ? "feito" : ""}${cor}${lem.destaque === l.id ? " destaque" : ""}" data-lembrete="${esc(l.id)}">
-      <input type="checkbox" ${feito ? `checked data-reabrir="${esc(l.id)}" title="Voltar para pendentes"` : `data-concluir="${esc(l.id)}" title="Marcar como concluído"`} aria-label="${esc(l.texto)}">
-      <div class="lembrete-corpo">
+      <div class="lembrete-linha">
+        <input type="checkbox" ${feito ? `checked data-reabrir="${esc(l.id)}" title="Voltar para pendentes"` : `data-concluir="${esc(l.id)}" title="Marcar como concluído"`} aria-label="${esc(l.texto)}">
         <span class="lembrete-texto">${al ? `<span class="marca-alerta nivel-${al.nivel}" title="${esc(`${al.tipo}: ${prazoTexto(al.dias)}`)}">${al.nivel === 2 ? "!!" : "!"}</span> ` : ""}${esc(l.texto)}</span>
-        ${l.descricao ? `<span class="lembrete-desc">${esc(l.descricao)}</span>` : ""}
-        ${l.anexos?.length ? `<span class="lembrete-anexos">${l.anexos.map((a) => `<button type="button" class="anexo" data-anexo="${esc(a.id)}" data-de="${esc(l.id)}" title="Abrir ${esc(a.nome)}">📎 ${esc(a.nome)}</button>`).join("")}</span>` : ""}
-        <span class="lembrete-meta">${l.cor ? `<span class="etiqueta-cor cor-${l.cor}">${esc(rotuloCor(l.cor))}</span> ` : ""}${datasDoLembrete(l)} ${feito ? `concluído ${esc(quando(l.concluidoEm))}` : esc(quando(l.criadoEm))}</span>
+        <div class="lembrete-acoes">
+          ${ativa ? `<span class="data-ativa nivel-${ativa.nivel}" title="${esc(`${ativa.tipo === "limite" ? "Data limite para conclusão" : "Previsão de conclusão"}: ${dataCurta(ativa.data)} (${prazoTexto(diasAte(ativa.data))})`)}">${ativa.tipo === "limite" ? "limite" : "prev."} ${diaMes(ativa.data)}</span>` : ""}
+          <button class="editar-lembrete" type="button" data-editar="${esc(l.id)}" title="Editar" aria-label="Editar">✎</button>
+          ${feito ? `<button class="excluir-lembrete" type="button" data-excluir="${esc(l.id)}" title="Excluir de vez (com os anexos)">Excluir</button>` : ""}
+        </div>
       </div>
-      <div class="lembrete-acoes">
-        <button class="editar-lembrete" type="button" data-editar="${esc(l.id)}" title="Editar" aria-label="Editar">✎</button>
-        ${feito ? `<button class="excluir-lembrete" type="button" data-excluir="${esc(l.id)}" title="Excluir de vez (com os anexos)">Excluir</button>` : ""}
+      <div class="lembrete-baixo">
+        <button type="button" class="abrir-detalhes" data-detalhes="${esc(l.id)}" aria-expanded="${aberto}">
+          <span class="seta-detalhes">${aberto ? "▾" : "▸"}</span> ${rotulo}${nAnexos ? ` · 📎 ${nAnexos}` : ""}
+        </button>
+        ${aberto ? `
+        <div class="lembrete-detalhes">
+          ${l.descricao ? `<span class="lembrete-desc">${esc(l.descricao)}</span>` : ""}
+          ${nAnexos ? `<span class="lembrete-anexos">${l.anexos.map((a) => `<button type="button" class="anexo" data-anexo="${esc(a.id)}" data-de="${esc(l.id)}" title="Abrir ${esc(a.nome)}">📎 ${esc(a.nome)}</button>`).join("")}</span>` : ""}
+          <span class="lembrete-meta">${l.cor ? `<span class="etiqueta-cor cor-${l.cor}">${esc(rotuloCor(l.cor))}</span> ` : ""}${datasDoLembrete(l)} ${feito ? `concluído ${esc(quando(l.concluidoEm))}` : `criado ${esc(quando(l.criadoEm))}`}</span>
+        </div>` : ""}
       </div>
     </li>`;
 }
@@ -1040,6 +1065,10 @@ function montarLembretes(caixa) {
       const a = d.lembretes.find((x) => x.id === ds.de)?.anexos?.find((x) => x.id === ds.anexo);
       if (a) abrirAnexo(a);
       return;
+    }
+    if (ds.detalhes) {
+      if (!lem.abertos.delete(ds.detalhes)) lem.abertos.add(ds.detalhes);
+      return redesenhar();
     }
     if (ds.editar) {
       abrirFormLembrete(d.lembretes.find((x) => x.id === ds.editar));
