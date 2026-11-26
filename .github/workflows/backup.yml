@@ -1,0 +1,61 @@
+# Backup do caderno num repositório privado, a cada salvamento.
+#
+# Copia a pasta data/ (caderno, token e anexos, tudo CRIPTOGRAFADO) para
+# myceliumBrain/caderno-profissional-backup. O backup tem histórico próprio:
+# cada salvamento do caderno vira um commit lá.
+#
+# Acesso: uma "deploy key" com escrita só no repositório de backup. A chave
+# privada fica no segredo BACKUP_DEPLOY_KEY deste repositório.
+name: Backup do caderno
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "data/**"
+  # Permite rodar manualmente pela aba Actions.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Vários salvamentos seguidos: só o mais recente precisa ser copiado.
+concurrency:
+  group: backup
+  cancel-in-progress: true
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o caderno
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: origem
+
+      - name: Baixar o backup
+        uses: actions/checkout@v4
+        with:
+          repository: myceliumBrain/caderno-profissional-backup
+          ssh-key: ${{ secrets.BACKUP_DEPLOY_KEY }}
+          path: backup
+
+      - name: Copiar e enviar
+        run: |
+          rsync -a --delete origem/data/ backup/data/
+          cd backup
+          git add -A data
+          if git diff --cached --quiet; then
+            echo "Nada mudou desde o último backup."
+            exit 0
+          fi
+          cd ../origem
+          msg="$(git log -1 --format=%s)"
+          sha="$(git rev-parse --short HEAD)"
+          cd ../backup
+          git config user.name "Backup do caderno"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "Backup: ${msg} (${sha})"
+          git push -q
+          echo "Backup enviado: ${msg} (${sha})"

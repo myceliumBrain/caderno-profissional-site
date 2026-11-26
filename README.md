@@ -45,6 +45,11 @@ recuperação), os arquivos são ilegíveis.
   caderno”). Lá, a setinha ▾ de cada item permite **Restaurar** ou **Apagar
   definitivamente** (sempre com um aviso de confirmação; apagar um caderno
   apaga também os textos dentro dele).
+- **Backup automático**: a cada salvamento, o GitHub Action
+  `.github/workflows/backup.yml` copia a pasta `data/` (criptografada) para o
+  repositório privado `myceliumBrain/caderno-profissional-backup`, que guarda o
+  histórico de versões. O acesso é uma *deploy key* que só grava nesse
+  repositório (segredo `BACKUP_DEPLOY_KEY`). Como restaurar: veja o README de lá.
 - **Exportar** cada texto (o texto contínuo inteiro, com as entradas) em PDF, Word
   (.docx) e .txt.
 - **Nada se perde**: cada alteração é copiada em segundos para o navegador
