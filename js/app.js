@@ -1,15 +1,16 @@
 import {
   novaChaveMestra, criarFechadura, abrirFechadura, cifrar, decifrar,
-  novoCodigoRecuperacao, normalizarCodigo, cifrarBytes, decifrarBytes,
+  novoCodigoRecuperacao, normalizarCodigo,
 } from "./cripto.js";
 import { lerPublico, GitHub, ErroConflito, ErroAcesso } from "./armazenamento.js";
 import { mesclarDados } from "./mesclar.js";
 import { CONFIG } from "./config.js";
 import {
   $, agora, novoId, esc, dataISO, horaISO, dataLonga, dataCurta, quando,
-  semAcento, textoDeHtml, plural, baixarArquivo, diaExecucao, datasDoTexto,
+  semAcento, textoDeHtml, plural, baixarArquivo, diaExecucao, datasDoTexto, normalizarUrl, nomeDoLink,
 } from "./util.js";
-import { montarEditor, montarBarra, markdownParaHtml } from "./editor.js";
+import { montarEditor, montarBarra, markdownParaHtml, configurarArquivos } from "./editor.js";
+import { guardarArquivo, lerArquivo, citacoes, coletarLixo, ARQUIVO_MAX_MB } from "./arquivos.js";
 import { exportarPdf, exportarTxt, exportarDocx } from "./exportar.js";
 import { guardarRascunho, lerRascunho, apagarRascunho, guardarPosicao, lerPosicao } from "./rascunho.js";
 
@@ -206,6 +207,7 @@ async function salvar() {
     }
     estado.erro = "";
     processarFilaAnexos();
+    setTimeout(coletarArquivos, 0); // depois do finally (estado.salvando = false)
     if (!estado.pendente && !estado.salvarDeNovo) {
       clearTimeout(timerRascunho);
       apagarRascunho();
@@ -286,7 +288,9 @@ async function abrirCaderno() {
   retomarPosicao(recuperou);
   if (recuperou) avisar("Recuperei alterações que ainda não tinham sido enviadas. Enviando agora…");
   if (estado.pendente) salvar();
-  processarFilaAnexos(); // anexos excluídos que ainda não tinham sido apagados do GitHub
+  processarFilaAnexos(); // fila antiga de anexos excluídos
+  migrarAnexosAntigos();
+  coletarArquivos();
 }
 
 // ---------------------------------------------------------------------------
@@ -624,8 +628,8 @@ const CORES_LEMBRETE = [
 ];
 const AVISO_PREVISAO_DIAS = 4;  // "!"  a 4 dias da previsão de conclusão
 const AVISO_LIMITE_DIAS = 7;    // "!!" a 7 dias da data limite
-const ANEXO_MAX_MB = 25;
-const caminhoAnexo = (id) => `data/anexos/${id}.bin`;
+const ANEXO_MAX_MB = ARQUIVO_MAX_MB;
+const caminhoAnexo = (id) => `data/anexos/${id}.bin`; // formato antigo (fila de exclusão antiga)
 
 const rotuloCor = (c) => CORES_LEMBRETE.find((x) => x.id === c)?.rotulo || "";
 // Estado do quadro (não vai para o GitHub).
@@ -672,15 +676,8 @@ function alertaDe(l) {
 const FILA_APAGAR = "caderno.anexosApagar";
 let apagandoAnexos = false;
 
-function apagarAnexos(ids) {
-  if (!ids.length) return;
-  let fila = [];
-  try { fila = JSON.parse(lerLS(FILA_APAGAR, "[]")); } catch {}
-  gravarLS(FILA_APAGAR, JSON.stringify([...new Set([...fila, ...ids])]));
-  processarFilaAnexos();
-}
-
-// Apaga do GitHub os anexos pendentes; o que falhar (sem internet) fica na fila.
+// Fila antiga de exclusão (versões anteriores do site): só termina de esvaziar.
+// Hoje quem apaga arquivos sem uso é a coleta de lixo (arquivos.js).
 async function processarFilaAnexos() {
   if (apagandoAnexos || !estado.github) return;
   apagandoAnexos = true;
@@ -699,11 +696,76 @@ async function processarFilaAnexos() {
   }
 }
 
+const ctxArquivos = () => ({ github: estado.github, chave: estado.chave });
+
 async function enviarAnexo(arquivo) {
-  const id = novoId("anexo");
-  const bytes = new Uint8Array(await arquivo.arrayBuffer());
-  await estado.github.gravarBinario(caminhoAnexo(id), await cifrarBytes(estado.chave, bytes), `Caderno: anexo ${agora()}`);
-  return { id, nome: arquivo.name, tipo: arquivo.type || "application/octet-stream", tamanho: arquivo.size, criadoEm: agora() };
+  return { id: novoId("arq"), ...(await guardarArquivo(ctxArquivos(), arquivo, citacoes(estado.dados).nomes)) };
+}
+
+// Botão 📎 do editor: envia e devolve as referências que entram no texto.
+async function anexarNoTexto(arquivos) {
+  if (!estado.github) { avisar("Sem conexão com o GitHub para enviar arquivos."); return []; }
+  const grande = arquivos.find((f) => f.size > ARQUIVO_MAX_MB * 1024 * 1024);
+  if (grande) { avisar(`“${grande.name}” passa de ${ARQUIVO_MAX_MB} MB.`); return []; }
+  const refs = [];
+  const ja = citacoes(estado.dados).nomes;
+  try {
+    for (const [i, f] of arquivos.entries()) {
+      avisar(`Enviando “${f.name}”${arquivos.length > 1 ? ` (${i + 1} de ${arquivos.length})` : ""}…`);
+      refs.push(await guardarArquivo(ctxArquivos(), f, ja));
+    }
+    $("#aviso").hidden = true;
+  } catch (e) {
+    avisar(e instanceof TypeError ? "Sem conexão: o arquivo não foi enviado." : e.message);
+  }
+  // Salva logo: o caderno passa a citar o arquivo (protege da coleta de lixo).
+  if (refs.length) setTimeout(() => salvar(), 50);
+  return refs;
+}
+
+// Coleta de lixo dos arquivos (no máximo 1 vez por hora, com o caderno já salvo).
+const COLETA_MS = 60 * 60 * 1000;
+let coletando = false;
+async function coletarArquivos() {
+  if (coletando || !estado.github || estado.pendente || estado.salvando) return;
+  if (Date.now() - Number(lerLS("caderno.ultimaColeta", "0")) < COLETA_MS) return;
+  coletando = true;
+  try {
+    await coletarLixo(ctxArquivos(), citacoes(estado.dados));
+    gravarLS("caderno.ultimaColeta", String(Date.now()));
+  } catch { /* sem internet: tenta na próxima */ } finally {
+    coletando = false;
+  }
+}
+
+// Lembretes com anexos no formato antigo (data/anexos/<id>.bin): copia cada um
+// para data/arquivos (nome pelo conteúdo). A cópia antiga deixa de ser citada
+// e a coleta de lixo a apaga depois.
+let migrandoAnexos = false;
+async function migrarAnexosAntigos() {
+  if (migrandoAnexos || !estado.github) return;
+  const antigos = (estado.dados.lembretes || []).flatMap((l) => (l.anexos || []).filter((a) => !a.hash).map((a) => [l, a]));
+  if (!antigos.length) return;
+  migrandoAnexos = true;
+  let mudou = false;
+  try {
+    const ja = citacoes(estado.dados).nomes;
+    for (const [l, a] of antigos) {
+      try {
+        const bytes = await lerArquivo(ctxArquivos(), a);
+        const ref = await guardarArquivo(ctxArquivos(), new File([bytes], a.nome, { type: a.tipo }), ja);
+        Object.assign(a, { id: novoId("arq"), hash: ref.hash });
+        l.atualizadoEm = agora();
+        mudou = true;
+      } catch { /* sem internet ou anexo sumido: fica como está */ }
+    }
+  } finally {
+    migrandoAnexos = false;
+  }
+  if (mudou) {
+    marcarAlterado();
+    salvar();
+  }
 }
 
 async function abrirAnexo(a) {
@@ -713,7 +775,7 @@ async function abrirAnexo(a) {
   if (janela) janela.document.title = a.nome;
   avisar(`Abrindo “${a.nome}”…`);
   try {
-    const bytes = await decifrarBytes(estado.chave, await estado.github.lerBinario(caminhoAnexo(a.id)));
+    const bytes = await lerArquivo(ctxArquivos(), a);
     const blob = new Blob([bytes], { type: a.tipo });
     if (janela) {
       janela.location = URL.createObjectURL(blob);
@@ -730,24 +792,8 @@ async function abrirAnexo(a) {
 // ── Desenho ──
 
 // ── Fontes (links) ──
-// Só endereços http(s); sem "https://", ele é acrescentado.
-function normalizarUrl(bruto) {
-  let t = (bruto || "").trim();
-  if (!t) return null;
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) t = `https://${t}`;
-  try {
-    const u = new URL(t);
-    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
-  } catch { return null; }
-}
-
 function nomeDaFonte(f) {
-  if (f.titulo) return f.titulo;
-  try {
-    const u = new URL(f.url);
-    const caminho = u.pathname === "/" ? "" : u.pathname;
-    return (u.hostname.replace(/^www\./, "") + caminho).slice(0, 60);
-  } catch { return f.url; }
+  return f.titulo || nomeDoLink(f.url);
 }
 
 // Passa o link digitado para a lista de fontes do formulário. false = link inválido.
@@ -1082,7 +1128,6 @@ function montarLembretes(caixa) {
       } catch (err) {
         lem.enviando = false;
         lem.erro = err instanceof TypeError ? "Sem conexão: os anexos não foram enviados. Tente de novo." : err.message;
-        apagarAnexos(novos.map((a) => a.id)); // não deixa anexos pela metade
         return montarLembretes($("#lembretes"));
       }
     }
@@ -1098,17 +1143,16 @@ function montarLembretes(caixa) {
     };
     const existente = lem.editando && d.lembretes.find((x) => x.id === lem.editando);
     if (existente) {
-      const tirados = (existente.anexos || []).filter((a) => lem.remover.has(a.id));
       Object.assign(existente, campos, {
         anexos: [...(existente.anexos || []).filter((a) => !lem.remover.has(a.id)), ...novos],
         atualizadoEm: agora(),
       });
-      apagarAnexos(tirados.map((a) => a.id));
     } else {
       d.lembretes.push({ id: novoId("lembrete"), ...campos, anexos: novos, criadoEm: t, atualizadoEm: agora(), concluidoEm: null });
     }
     fecharForms();
     marcarAlterado();
+    if (novos.length) salvar(); // o caderno passa a citar os arquivos enviados
     montarLembretes($("#lembretes"));
   });
   caixa.querySelector("details.concluidos")?.addEventListener("toggle", (e) => gravarLS("caderno.concluidos", e.target.open ? "1" : "0"));
@@ -1196,7 +1240,6 @@ function montarLembretes(caixa) {
       if (!l || !confirm(`Excluir de vez o lembrete “${l.texto}”${n ? ` e ${plural(n, "anexo", "anexos")}` : ""}?`)) return;
       d.lembretes = d.lembretes.filter((x) => x.id !== l.id);
       d.removidos[l.id] = agora();
-      apagarAnexos((l.anexos || []).map((a) => a.id));
       marcarAlterado();
       return redesenhar();
     }
@@ -1222,7 +1265,6 @@ function montarLembretes(caixa) {
         d.lembretes = d.lembretes.filter((l) => l.pasta !== pasta.id);
         d.pastasLembretes = d.pastasLembretes.filter((p) => p.id !== pasta.id);
         d.removidos[pasta.id] = t;
-        apagarAnexos(anexos);
         fecharForms();
         lem.pasta = null;
         marcarAlterado();
@@ -1689,6 +1731,7 @@ let timerBusca = null;
 let timerRolagem = null;
 
 function configurarApp() {
+  configurarArquivos({ anexar: anexarNoTexto, abrir: abrirAnexo });
   $("#ir-inicio").addEventListener("click", abrirInicio);
   $("#voltar-inicio").addEventListener("click", abrirInicio);
   $("#abrir-lixeira").addEventListener("click", abrirLixeira);

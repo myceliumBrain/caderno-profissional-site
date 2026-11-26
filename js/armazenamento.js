@@ -98,7 +98,7 @@ export class GitHub {
     }
     return (await r.json()).content.sha;
   }
-  // ── Arquivos binários (anexos dos lembretes) ──
+  // ── Arquivos binários (anexos) ──
 
   async gravarBinario(caminho, bytes, mensagem) {
     const corpo = JSON.stringify({ message: mensagem, content: paraB64(bytes), branch: CONFIG.branch });
@@ -113,6 +113,30 @@ export class GitHub {
     }
   }
 
+  // Grava só se o arquivo ainda não existir (nomes tirados do conteúdo: se já
+  // existe, é idêntico). Devolve true se gravou, false se já estava lá.
+  async gravarSeNovo(caminho, bytes, mensagem) {
+    try {
+      await this.gravarBinario(caminho, bytes, mensagem);
+      return true;
+    } catch (e) {
+      const r = await this.api(`${urlConteudo(caminho)}?ref=${encodeURIComponent(CONFIG.branch)}`, { method: "HEAD" });
+      if (r.ok) return false;
+      throw e;
+    }
+  }
+
+  // Lista os arquivos de uma pasta: [{ nome, caminho, sha, tamanho }]. Pasta inexistente = [].
+  async listar(pasta) {
+    const r = await this.api(`${urlConteudo(pasta)}?ref=${encodeURIComponent(CONFIG.branch)}`);
+    if (r.status === 404) return [];
+    if (!r.ok) throw new Error(`Erro do GitHub ao listar ${pasta} (HTTP ${r.status}).`);
+    const itens = await r.json();
+    return (Array.isArray(itens) ? itens : [])
+      .filter((x) => x.type === "file")
+      .map((x) => ({ nome: x.name, caminho: x.path, sha: x.sha, tamanho: x.size }));
+  }
+
   async lerBinario(caminho) {
     const r = await this.api(`${urlConteudo(caminho)}?ref=${encodeURIComponent(CONFIG.branch)}`, {
       headers: { Accept: "application/vnd.github.raw" },
@@ -123,12 +147,16 @@ export class GitHub {
   }
 
   // Apaga um arquivo. Devolve sem erro se ele já não existir.
-  async apagar(caminho, mensagem) {
+  // `shaConhecido` (de uma listagem) poupa uma consulta.
+  async apagar(caminho, mensagem, shaConhecido = null) {
     for (let tentativa = 0; ; tentativa++) {
-      const r = await this.api(`${urlConteudo(caminho)}?ref=${encodeURIComponent(CONFIG.branch)}`);
-      if (r.status === 404) return;
-      if (!r.ok) throw new Error(`Erro do GitHub ao apagar ${caminho} (HTTP ${r.status}).`);
-      const { sha } = await r.json();
+      let sha = tentativa === 0 ? shaConhecido : null;
+      if (!sha) {
+        const r = await this.api(`${urlConteudo(caminho)}?ref=${encodeURIComponent(CONFIG.branch)}`);
+        if (r.status === 404) return;
+        if (!r.ok) throw new Error(`Erro do GitHub ao apagar ${caminho} (HTTP ${r.status}).`);
+        sha = (await r.json()).sha;
+      }
       const d = await this.api(urlConteudo(caminho), {
         method: "DELETE",
         body: JSON.stringify({ message: mensagem, sha, branch: CONFIG.branch }),

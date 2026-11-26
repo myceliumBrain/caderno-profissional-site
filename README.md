@@ -9,6 +9,7 @@ senha. Dois arquivos:
 
 - `data/auth.json`: o token do GitHub, criptografado.
 - `data/caderno.json`: cadernos e textos, **criptografados** com a mesma chave.
+- `data/arquivos/`: arquivos anexados (PDFs, fotos…), também criptografados.
 
 O repositório e o site podem ser públicos: sem a senha (ou o código de
 recuperação), os arquivos são ilegíveis.
@@ -30,7 +31,7 @@ recuperação), os arquivos são ilegíveis.
 - **Editor visual** (Escrever / Ler) com barra de formatação: negrito, itálico,
   sublinhado, subtítulo, texto pequeno, sub/sobrescrito, listas, lista de
   **passos** com caixinha (marcável também no modo Ler, útil na bancada),
-  tabelas (com linha acima/abaixo e coluna à esquerda/direita), **notas na margem** (✱ Nota: um “*” ou “2x” ao lado das palavras selecionadas), **caixa com bordas** para comentários (▭ Caixa), alinhamento e limpar formatação. Textos em Times New Roman; a
+  tabelas (com linha acima/abaixo e coluna à esquerda/direita), **notas na margem** (✱ Nota: um “*” ou “2x” ao lado das palavras selecionadas), **caixa com bordas** para comentários (▭ Caixa), **links** (🔗 Link: selecione o texto ou só clique para inserir; no modo Ler o clique abre o site, no Escrever é Ctrl+clique), **arquivos no meio do texto** (📎 Arquivo: o PDF de um artigo, uma foto… entram onde está o cursor, como uma etiqueta que abre com um clique; até 25 MB cada), alinhamento e limpar formatação. Textos em Times New Roman; a
   interface em Lexend. Tema claro ou escuro (⚙ → Aparência). Ao colar de Word/PDF/sites, a formatação estranha é limpa.
 - **Painéis laterais recolhíveis**: cadernos e lista de textos (esta começa recolhida).
 - **Lembretes** na página inicial, ao lado dos cadernos. O **+** oferece
@@ -39,10 +40,10 @@ recuperação), os arquivos são ilegíveis.
   **título, descrição, cor** (🔴 Prioritário, 🔵 Intelectual, 🟢 Rotina,
   🟡 Social), **previsão de conclusão**, **data limite**, **fontes** (links de
   sites/artigos, com nome opcional, separados da descrição) e **anexos** (fotos,
-  PDFs, qualquer arquivo até 25 MB, cifrados em `data/anexos/`). O ✎ edita
+  PDFs, qualquer arquivo até 25 MB, em `data/arquivos/`). O ✎ edita
   tudo isso. Marcar como feito leva para “Concluídos”; só ali dá para excluir
   de vez, e aí os anexos também são apagados do repositório (o mesmo vale ao
-  excluir uma pasta).
+  excluir uma pasta) — veja “Arquivos anexados” abaixo.
   - No topo do site aparece **“X lembretes”** (os pendentes).
   - No rodapé aparecem os pendentes perto do prazo: **!** a 4 dias da previsão
     e **!!** a 7 dias da data limite (ou atrasados). Clicar leva ao lembrete.
@@ -128,11 +129,36 @@ js/util.js            funções pequenas (datas, textos, download)
 js/cripto.js          criptografia (senha, código de recuperação, conteúdo)
 js/armazenamento.js   leitura/gravação pela API do GitHub
 js/mesclar.js         junta versões vindas de aparelhos diferentes
+js/arquivos.js        arquivos anexados: nome pelo conteúdo e coleta de lixo
 vendor/               DOMPurify (sanitização), docx (gerar .docx), marked (converte textos antigos em Markdown)
 serve.py              servidor local
 data/auth.json        token do GitHub, cifrado (criado no primeiro acesso)
 data/caderno.json     cadernos e textos, cifrados (criado no primeiro acesso)
+data/arquivos/        arquivos anexados (textos e lembretes), cifrados
 ```
+
+### Arquivos anexados
+
+Mesma arquitetura que o próprio Git usa para guardar seus objetos:
+**armazenamento endereçado por conteúdo + coleta de lixo “marcar e varrer”**.
+
+- Cada arquivo vai para `data/arquivos/<nome>.bin`, onde o nome é tirado do
+  **conteúdo** (HMAC-SHA256 com uma chave derivada da chave do caderno; um
+  SHA-256 puro revelaria qual é o arquivo). O mesmo PDF anexado em dois
+  textos, ou duas vezes, gera o mesmo nome e é gravado **uma vez só**: não há
+  como duplicar nem dois arquivos disputarem um nome.
+- O caderno não mantém contadores de uso (que podem se desencontrar). Um
+  arquivo está em uso se algum texto, entrada, lembrete — inclusive na
+  lixeira — o cita.
+- Depois de salvar (no máximo 1 vez por hora), o site lista `data/arquivos/` e
+  **marca** os que nada cita. Um arquivo só é **apagado** se continuar sem uso
+  numa coleta feita 24 h depois (como o prazo do `git gc`). Isso protege um
+  envio em andamento em outro aparelho e o “desfazer” logo depois de tirar um
+  anexo do texto.
+- Anexos de lembretes do formato antigo (`data/anexos/`) são copiados para
+  `data/arquivos/` na primeira abertura; a cópia antiga é apagada pela coleta.
+- O histórico do Git guarda versões antigas para sempre; a coleta tira o
+  arquivo da versão atual do repositório (e do backup).
 
 ### Formato de `data/caderno.json` (depois de decifrado)
 

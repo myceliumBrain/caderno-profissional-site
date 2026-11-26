@@ -103,3 +103,24 @@ export async function decifrarBytes(chaveMestra, bytes) {
   const chave = await importarChaveMestra(chaveMestra);
   return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.subarray(0, 12) }, chave, bytes.subarray(12)));
 }
+
+// Nome de um arquivo no repositório, tirado do PRÓPRIO CONTEÚDO (como o Git faz
+// com seus objetos): o mesmo arquivo sempre gera o mesmo nome, então ele nunca
+// fica duplicado. É um HMAC-SHA256 com uma chave derivada da chave mestra (e
+// não um SHA-256 puro), para que o nome não revele qual arquivo é.
+let chaveDeNomes = null;
+export async function nomeDoConteudo(chaveMestra, bytes) {
+  if (!chaveDeNomes || chaveDeNomes.mestra !== chaveMestra) {
+    const base = await crypto.subtle.importKey("raw", chaveMestra, "HKDF", false, ["deriveKey"]);
+    const chave = await crypto.subtle.deriveKey(
+      { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: enc.encode("caderno/arquivos/nome") },
+      base,
+      { name: "HMAC", hash: "SHA-256", length: 256 },
+      false,
+      ["sign"],
+    );
+    chaveDeNomes = { mestra: chaveMestra, chave };
+  }
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", chaveDeNomes.chave, bytes));
+  return [...mac].map((b) => b.toString(16).padStart(2, "0")).join("");
+}

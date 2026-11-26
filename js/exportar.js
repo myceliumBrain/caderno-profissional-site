@@ -46,6 +46,7 @@ const CSS_IMPRESSAO = `
   .rt-moldura { position: relative; }
   .rt.com-notas { margin-right: 3cm; }
   span.nota { text-decoration: underline dotted; }
+  span.arquivo { border: 1px solid #999; border-radius: 4pt; padding: 0 .4em; font-size: .9em; }
   .rt-notas { position: absolute; top: 0; right: 0; bottom: 0; width: 2.6cm; }
   .nota-barra { position: absolute; left: 0; width: 1.5pt; background: #555; }
   .nota-texto { position: absolute; left: .2cm; right: 0; font: bold 8.5pt/1.3 sans-serif; color: #333; }
@@ -84,7 +85,14 @@ function paraTexto(no) {
   const dentro = () => [...no.childNodes].map(paraTexto).join("");
   switch (tag) {
     case "BR": return "\n";
-    case "SPAN": return no.dataset.fimNota ? `${dentro()} [${no.dataset.nota}]` : dentro();
+    case "SPAN":
+      if (no.classList.contains("arquivo")) return `[anexo: ${no.dataset.nome || "arquivo"}]`;
+      return no.dataset.fimNota ? `${dentro()} [${no.dataset.nota}]` : dentro();
+    case "A": {
+      const t = dentro();
+      const url = no.getAttribute("href") || "";
+      return url && t.trim() !== url ? `${t} (${url})` : t;
+    }
     case "BLOCKQUOTE":
       if (no.classList.contains("caixa")) {
         const linhas = dentro().trim().replace(/\n{3,}/g, "\n\n").split("\n");
@@ -153,7 +161,7 @@ export async function exportarDocx(texto) {
       const t = no.textContent.replace(/\s+/g, " ");
       if (!t) return [];
       return [new D.TextRun({
-        text: t, bold: f.b, italics: f.i, underline: f.u ? {} : undefined,
+        text: t, bold: f.b, italics: f.i, underline: f.u || f.link ? {} : undefined, color: f.link ? "0563C1" : undefined,
         size: f.pequeno ? 19 : undefined, superScript: f.sup, subScript: f.sub,
       })];
     }
@@ -168,6 +176,13 @@ export async function exportarDocx(texto) {
     if (tag === "SMALL") g.pequeno = true;
     if (tag === "SUP") g.sup = true;
     if (tag === "SUB") g.sub = true;
+    if (tag === "SPAN" && no.classList.contains("arquivo")) {
+      return [new D.TextRun({ text: `[anexo: ${no.dataset.nome || "arquivo"}]`, italics: true, color: "444444" })];
+    }
+    if (tag === "A" && /^https?:\/\//i.test(no.getAttribute("href") || "")) {
+      g.link = true;
+      return [new D.ExternalHyperlink({ link: no.getAttribute("href"), children: [...no.childNodes].flatMap((c) => runs(c, g)) })];
+    }
     const filhos = [...no.childNodes].flatMap((c) => runs(c, g));
     if (tag === "SPAN" && no.dataset.fimNota) {
       filhos.push(new D.TextRun({ text: ` ${no.dataset.nota}`, bold: true, superScript: true, color: "444444" }));

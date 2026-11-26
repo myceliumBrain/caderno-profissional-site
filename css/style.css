@@ -451,7 +451,16 @@ legend { font-weight: 600; font-size: .9rem; padding: 0 .3rem; }
 .rt h2 { font: 700 1.4em/1.3 var(--doc); margin: 1.3em 0 .45em; }
 .rt h3 { font: 700 1.17em/1.3 var(--doc); margin: 1.2em 0 .4em; }
 .rt small { font-size: .8em; color: var(--doc-suave); }
-.rt a { color: var(--acento); }
+.rt a { color: var(--acento); cursor: pointer; }
+.rt[contenteditable="true"] a { cursor: text; }
+/* Anexo no meio do texto (PDF, foto…): clique abre */
+.rt span.arquivo {
+  display: inline-block; max-width: 100%; vertical-align: -.45em;
+  padding: 0 .5em; margin: 0 .1em; border: 1px solid var(--borda); border-radius: 6px;
+  background: var(--painel); color: var(--acento); font: 500 .85em/1.6 var(--ui);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; user-select: all;
+}
+.rt span.arquivo:hover { border-color: var(--acento); }
 .rt blockquote { margin: 1em 0; padding: .1em 1em; border-left: 3px solid var(--borda); color: var(--doc-suave); }
 /* Caixa com bordas (comentários) */
 .rt blockquote.caixa {

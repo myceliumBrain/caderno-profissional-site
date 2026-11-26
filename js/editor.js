@@ -5,10 +5,13 @@
 // último editor em que o cursor esteve (corpo do texto, descrição ou
 // entrada do diário).
 
+import { esc, normalizarUrl, nomeDoLink } from "./util.js";
+
 // Tags e atributos aceitos no conteúdo.
 const TAGS = ["p", "br", "h2", "h3", "strong", "b", "em", "i", "u", "small", "sub", "sup",
   "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "hr", "span"];
-const ATRIBUTOS = ["href", "style", "class", "data-feito", "data-nova", "data-nota", "data-grupo", "colspan", "rowspan", "target", "rel"];
+const ATRIBUTOS = ["href", "style", "class", "data-feito", "data-nova", "data-nota", "data-grupo",
+  "data-arquivo", "data-nome", "data-tipo", "data-tamanho", "colspan", "rowspan", "target", "rel"];
 
 export function limparHtml(html) {
   if (!window.DOMPurify) return html || "";
@@ -56,6 +59,8 @@ export function normalizar(html) {
       div.replaceWith(p);
     }
   }
+  // atributos só de tela (repostos por prepararArquivos ao abrir)
+  tpl.content.querySelectorAll("span.arquivo, a").forEach((a) => { a.removeAttribute("contenteditable"); a.removeAttribute("title"); });
   // texto solto no primeiro nível vira parágrafo
   for (const no of [...tpl.content.childNodes]) {
     if (no.nodeType === 3 && no.textContent.trim()) {
@@ -83,6 +88,124 @@ function estaVazio(el) {
 
 function atualizarVazio(el) {
   el.classList.toggle("vazio", estaVazio(el));
+}
+
+// ── Anexos e links ──
+// Um anexo no meio do texto é um <span class="arquivo" data-arquivo="<nome>">
+// que não se edita por dentro (apaga-se inteiro, como uma letra). O envio e a
+// abertura ficam por conta do app (configurarArquivos).
+const ganchos = { anexar: null, abrir: null };
+export function configurarArquivos(g) { Object.assign(ganchos, g); }
+
+const refDoAnexo = (span) => ({
+  hash: span.dataset.arquivo, nome: span.dataset.nome || "arquivo",
+  tipo: span.dataset.tipo || "application/octet-stream", tamanho: Number(span.dataset.tamanho) || 0,
+});
+
+function tamanhoCurto(n) {
+  if (!n) return "";
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / 1024 / 1024).toFixed(1).replace(".", ",")} MB`;
+}
+
+export function htmlDoAnexo(ref) {
+  return `<span class="arquivo" data-arquivo="${esc(ref.hash)}" data-nome="${esc(ref.nome)}" data-tipo="${esc(ref.tipo)}" data-tamanho="${esc(ref.tamanho)}">📎 ${esc(ref.nome)}</span>`;
+}
+
+function prepararArquivos(raiz) {
+  raiz.querySelectorAll("span.arquivo").forEach((a) => {
+    a.contentEditable = "false";
+    const tam = tamanhoCurto(Number(a.dataset.tamanho));
+    a.title = `${a.dataset.nome || "arquivo"}${tam ? ` · ${tam}` : ""} — clique para abrir`;
+  });
+  raiz.querySelectorAll("a[href]").forEach((a) => {
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.title = `${a.getAttribute("href")}${raiz.isContentEditable ? " — Ctrl+clique para abrir" : ""}`;
+  });
+}
+
+// Botão 🔗: com texto selecionado, vira link; sem seleção, insere o link;
+// com o cursor num link, troca o endereço (vazio = tira o link).
+function alternarLink() {
+  const s = sel();
+  if (!s.rangeCount) return;
+  const r = s.getRangeAt(0).cloneRange();
+  const atual = elementoDe(r.startContainer)?.closest("a");
+  if (atual && editorAtivo.contains(atual)) {
+    const novo = prompt("Endereço do link (deixe vazio para tirar o link):", atual.getAttribute("href") || "");
+    if (novo === null) return;
+    if (!novo.trim()) { atual.replaceWith(...atual.childNodes); return; }
+    const url = normalizarUrl(novo);
+    if (!url) { alert("Esse link não parece válido (use um endereço de site, ex.: www.exemplo.com)."); return; }
+    atual.setAttribute("href", url);
+    prepararArquivos(editorAtivo);
+    return;
+  }
+  const bruto = prompt(r.collapsed ? "Endereço do link (site, artigo…):" : "Endereço do link para o trecho selecionado:");
+  if (!bruto?.trim()) return;
+  const url = normalizarUrl(bruto);
+  if (!url) { alert("Esse link não parece válido (use um endereço de site, ex.: www.exemplo.com)."); return; }
+  editorAtivo.focus();
+  s.removeAllRanges();
+  s.addRange(r);
+  if (r.collapsed) {
+    const a = document.createElement("a");
+    a.setAttribute("href", url);
+    a.textContent = nomeDoLink(url);
+    const espaco = document.createTextNode("\u00a0");
+    r.insertNode(espaco);
+    r.insertNode(a);
+    const depois = document.createRange();
+    depois.setStartAfter(espaco);
+    s.removeAllRanges();
+    s.addRange(depois);
+  } else {
+    cmd("createLink", url);
+  }
+  prepararArquivos(editorAtivo);
+}
+
+// Botão 📎: escolhe arquivos, o app envia, e eles entram onde estava o cursor.
+function escolherArquivos() {
+  if (!ganchos.anexar) return;
+  const destino = editorAtivo;
+  const faixa = sel().rangeCount ? sel().getRangeAt(0).cloneRange() : null;
+  const entrada = document.createElement("input");
+  entrada.type = "file";
+  entrada.multiple = true;
+  entrada.addEventListener("change", async () => {
+    const arquivos = [...entrada.files];
+    if (!arquivos.length) return;
+    const refs = await ganchos.anexar(arquivos);
+    if (!refs?.length || !destino || !document.body.contains(destino) || !destino.isContentEditable) return;
+    inserirAnexos(destino, faixa, refs);
+  });
+  entrada.click();
+}
+
+export function inserirAnexos(destino, faixa, refs) {
+  editorAtivo = destino;
+  destino.focus();
+  const s = sel();
+  let r = faixa && destino.contains(faixa.startContainer) ? faixa : null;
+  if (!r) {
+    if (!destino.lastChild) destino.innerHTML = "<p><br></p>";
+    r = document.createRange();
+    r.selectNodeContents(destino.lastChild);
+    r.collapse(false);
+  }
+  r.deleteContents();
+  const tpl = document.createElement("template");
+  tpl.innerHTML = refs.map((x) => htmlDoAnexo(x)).join("\u00a0") + "\u00a0";
+  const ultimo = tpl.content.lastChild;
+  r.insertNode(tpl.content);
+  const depois = document.createRange();
+  depois.setStartAfter(ultimo);
+  s.removeAllRanges();
+  s.addRange(depois);
+  prepararArquivos(destino);
+  avisarMudanca();
 }
 
 // ── Notas na margem ──
@@ -167,6 +290,7 @@ function partesDaNota(span, raiz) {
 export function montarEditor(el, { html, editavel, placeholder, aoMudar }) {
   el.classList.add("rt", "documento");
   el.innerHTML = limparHtml(html);
+  prepararArquivos(el);
   el.dataset.placeholder = placeholder || "";
   el.spellcheck = true;
   const definirEditavel = (sim) => { el.contentEditable = sim ? "true" : "false"; };
@@ -225,6 +349,23 @@ export function montarEditor(el, { html, editavel, placeholder, aoMudar }) {
     if (limpo == null) return;
     e.preventDefault();
     document.execCommand("insertHTML", false, limpo);
+  });
+  // Anexo: clicar abre. Link: abre em outra aba (no modo Escrever, com Ctrl+clique).
+  el.addEventListener("click", (e) => {
+    const arq = e.target.closest?.("span.arquivo[data-arquivo]");
+    if (arq && el.contains(arq)) {
+      e.preventDefault();
+      ganchos.abrir?.(refDoAnexo(arq));
+      return;
+    }
+    const a = e.target.closest?.("a[href]");
+    if (a && el.contains(a)) {
+      e.preventDefault();
+      if (el.contentEditable !== "true" || e.ctrlKey || e.metaKey) {
+        const url = normalizarUrl(a.getAttribute("href"));
+        if (url) window.open(url, "_blank", "noopener,noreferrer");
+      }
+    }
   });
   // Lista de passos: clicar na caixinha marca/desmarca (também no modo Ler).
   el.addEventListener("click", (e) => {
@@ -580,6 +721,9 @@ const BOTOES = [
   { id: "nota", rotulo: "✱ Nota", titulo: "Nota na margem para as palavras selecionadas (ex.: *, 2x, “repetido”). Com o cursor numa nota: editar ou apagar", acao: alternarNota },
   { id: "caixa", rotulo: "▭ Caixa", titulo: "Põe as linhas selecionadas dentro de um bloco com bordas (ótimo para comentários). Clique de novo para tirar", acao: alternarCaixa },
   "|",
+  { id: "link", rotulo: "🔗 Link", titulo: "Link para um site/artigo: selecione o texto (ou só clique para inserir). Com o cursor num link: trocar ou tirar", acao: alternarLink },
+  { id: "arquivo", rotulo: "📎 Arquivo", titulo: "Anexa arquivos (PDF de um artigo, foto…) no ponto onde está o cursor", acao: escolherArquivos },
+  "|",
   { menu: "Alinhamento", titulo: "Alinhar a linha (ou as linhas selecionadas)", itens: [
     { rotulo: "À esquerda", acao: () => cmd("justifyLeft") },
     { rotulo: "Centralizado", acao: () => cmd("justifyCenter") },
@@ -677,5 +821,6 @@ function atualizarEstadoDaBarra() {
   barraAtual.querySelector('[data-id="pequeno"]')?.classList.toggle("ativo", !!el?.closest("small"));
   barraAtual.querySelector('[data-id="passos"]')?.classList.toggle("ativo", !!el?.closest("ul.tarefas"));
   barraAtual.querySelector('[data-id="nota"]')?.classList.toggle("ativo", !!el?.closest("span.nota"));
+  barraAtual.querySelector('[data-id="link"]')?.classList.toggle("ativo", !!el?.closest("a"));
   barraAtual.querySelector('[data-id="caixa"]')?.classList.toggle("ativo", !!el?.closest("blockquote.caixa"));
 }

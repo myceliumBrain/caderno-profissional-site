@@ -93,3 +93,23 @@ export function datasDoTexto(t) {
   linhas.push(["Criado em", dataHora(t.criadoEm)], ["Editado em", dataHora(t.atualizadoEm)]);
   return linhas.filter(([, v]) => v);
 }
+
+// Links: só endereços http(s); sem "https://", ele é acrescentado. null = inválido.
+export function normalizarUrl(bruto) {
+  let t = (bruto || "").trim();
+  if (!t) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) t = `https://${t}`;
+  try {
+    const u = new URL(t);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+  } catch { return null; }
+}
+
+// Nome curto de um link: "scielo.br/j/abc".
+export function nomeDoLink(url) {
+  try {
+    const u = new URL(url);
+    const caminho = u.pathname === "/" ? "" : u.pathname;
+    return (u.hostname.replace(/^www\./, "") + caminho).slice(0, 60);
+  } catch { return url; }
+}
