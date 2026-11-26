@@ -33,6 +33,15 @@ const CSS_IMPRESSAO = `
   ul.tarefas li[data-feito="true"]::before { content: "☑  "; }
   .rodape { margin-top: 2em; font-size: 9pt; color: #555; }
   .datas { margin: -.6em 0 1.4em; font-size: 10pt; color: #333; line-height: 1.45; }
+  blockquote { margin: .8em 0; padding: .1em 1em; border-left: 2px solid #999; }
+  blockquote.caixa { border: 1px solid #555; border-radius: 4pt; padding: .5em .8em; background: #f4f4f4; }
+  blockquote.caixa > :last-child { margin-bottom: 0; }
+  body.com-notas { margin-right: 2.6cm; position: relative; }
+  span.nota { text-decoration: underline dotted; }
+  span.nota::after {
+    content: attr(data-nota); position: absolute; left: calc(100% + .4cm); width: 2.2cm;
+    padding-left: .2cm; border-left: 1.5pt solid #555; font: bold 8.5pt/1.3 sans-serif; color: #333;
+  }
 `;
 
 // PDF: abre a janela de impressão só com o documento ("Salvar como PDF").
@@ -45,7 +54,7 @@ export function exportarPdf(texto) {
   const doc = iframe.contentDocument;
   doc.open();
   doc.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(nomeDeArquivo(titulo))}</title><style>${CSS_IMPRESSAO}</style></head>
-    <body><h1>${esc(titulo)}</h1><p class="datas">${datas.map(([r, v]) => `<strong>${esc(r)}:</strong> ${esc(v)}`).join("<br>")}</p>${html}<p class="rodape">Exportado em ${esc(new Date().toLocaleString("pt-BR"))}</p></body></html>`);
+    <body class="${html.includes('class="nota"') ? "com-notas" : ""}"><h1>${esc(titulo)}</h1><p class="datas">${datas.map(([r, v]) => `<strong>${esc(r)}:</strong> ${esc(v)}`).join("<br>")}</p>${html}<p class="rodape">Exportado em ${esc(new Date().toLocaleString("pt-BR"))}</p></body></html>`);
   doc.close();
   setTimeout(() => {
     iframe.contentWindow.focus();
@@ -65,7 +74,14 @@ function paraTexto(no) {
   const dentro = () => [...no.childNodes].map(paraTexto).join("");
   switch (tag) {
     case "BR": return "\n";
-    case "P": case "BLOCKQUOTE": case "DIV": return `\n${dentro().trim()}\n`;
+    case "SPAN": return no.classList.contains("nota") ? `${dentro()} [${no.dataset.nota}]` : dentro();
+    case "BLOCKQUOTE":
+      if (no.classList.contains("caixa")) {
+        const linhas = dentro().trim().replace(/\n{3,}/g, "\n\n").split("\n");
+        return `\n┌${"─".repeat(40)}\n${linhas.map((l) => `│ ${l}`).join("\n")}\n└${"─".repeat(40)}\n`;
+      }
+      return `\n${dentro().trim()}\n`;
+    case "P": case "DIV": return `\n${dentro().trim()}\n`;
     case "H2": case "H3": {
       const t = dentro().trim();
       return `\n\n${t}\n${(tag === "H2" ? "=" : "-").repeat(Math.min(t.length, 60))}\n`;
@@ -140,8 +156,19 @@ export async function exportarDocx(texto) {
     if (tag === "SMALL") g.pequeno = true;
     if (tag === "SUP") g.sup = true;
     if (tag === "SUB") g.sub = true;
-    return [...no.childNodes].flatMap((c) => runs(c, g));
+    const filhos = [...no.childNodes].flatMap((c) => runs(c, g));
+    if (tag === "SPAN" && no.classList.contains("nota")) {
+      filhos.push(new D.TextRun({ text: ` ${no.dataset.nota}`, bold: true, superScript: true, color: "444444" }));
+    }
+    return filhos;
   }
+
+  // Parágrafo; dentro de uma caixa (comentário), ganha borda e fundo cinza.
+  let naCaixa = false;
+  const borda = { style: D.BorderStyle.SINGLE, size: 6, color: "555555", space: 6 };
+  const par = (o) => { const opcoes = typeof o === "string" ? { text: o } : o; return new D.Paragraph(naCaixa
+    ? { ...opcoes, border: { top: borda, bottom: borda, left: borda, right: borda }, shading: { type: D.ShadingType.CLEAR, fill: "F2F2F2", color: "auto" } }
+    : opcoes); };
 
   function lista(ul, nivel) {
     const tarefas = ul.classList.contains("tarefas");
@@ -151,7 +178,7 @@ export async function exportarDocx(texto) {
     for (const li of ul.children) {
       const filhos = runs(li);
       if (tarefas) filhos.unshift(new D.TextRun(li.dataset.feito === "true" ? "☑  " : "☐  "));
-      saida.push(new D.Paragraph({
+      saida.push(par({
         children: filhos,
         alignment: alinhamento(li),
         ...(tarefas ? { indent: { left: 360 + nivel * 360 } }
@@ -170,22 +197,32 @@ export async function exportarDocx(texto) {
         margins: { top: 60, bottom: 60, left: 100, right: 100 },
       })),
     }));
-    return [new D.Table({ rows: linhas, width: { size: 100, type: D.WidthType.PERCENTAGE } }), new D.Paragraph("")];
+    return [new D.Table({ rows: linhas, width: { size: 100, type: D.WidthType.PERCENTAGE } }), par("")];
   }
 
   function blocos(no) {
-    if (no.nodeType === 3) return no.textContent.trim() ? [new D.Paragraph({ children: runs(no) })] : [];
+    if (no.nodeType === 3) return no.textContent.trim() ? [par({ children: runs(no) })] : [];
     if (no.nodeType !== 1) return [];
     switch (no.tagName) {
-      case "H2": return [new D.Paragraph({ children: runs(no), heading: D.HeadingLevel.HEADING_2, alignment: alinhamento(no) })];
-      case "H3": return [new D.Paragraph({ children: runs(no), heading: D.HeadingLevel.HEADING_3, alignment: alinhamento(no) })];
+      case "H2": return [par({ children: runs(no), heading: D.HeadingLevel.HEADING_2, alignment: alinhamento(no) })];
+      case "H3": return [par({ children: runs(no), heading: D.HeadingLevel.HEADING_3, alignment: alinhamento(no) })];
       case "UL": case "OL": return lista(no, 0);
       case "TABLE": return tabela(no);
-      case "HR": return [new D.Paragraph("")];
-      case "DIV": case "BLOCKQUOTE": case "SECTION":
+      case "HR": return [par("")];
+      case "BLOCKQUOTE":
+        if (no.classList.contains("caixa")) {
+          // Parágrafos seguidos com a mesma borda: o Word desenha uma caixa só.
+          const antes = naCaixa;
+          naCaixa = true;
+          try {
+            return no.querySelector("p, h2, h3, ul, ol, table, div") ? [...no.childNodes].flatMap(blocos) : [par({ children: runs(no) })];
+          } finally { naCaixa = antes; }
+        }
+        // fallthrough
+      case "DIV": case "SECTION":
         if (no.querySelector("p, h2, h3, ul, ol, table, div")) return [...no.childNodes].flatMap(blocos);
-        return [new D.Paragraph({ children: runs(no), alignment: alinhamento(no) })];
-      default: return [new D.Paragraph({ children: runs(no), alignment: alinhamento(no) })];
+        return [par({ children: runs(no), alignment: alinhamento(no) })];
+      default: return [par({ children: runs(no), alignment: alinhamento(no) })];
     }
   }
 

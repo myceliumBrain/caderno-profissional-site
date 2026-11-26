@@ -7,8 +7,8 @@
 
 // Tags e atributos aceitos no conteúdo.
 const TAGS = ["p", "br", "h2", "h3", "strong", "b", "em", "i", "u", "small", "sub", "sup",
-  "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "hr"];
-const ATRIBUTOS = ["href", "style", "class", "data-feito", "data-nova", "colspan", "rowspan", "target", "rel"];
+  "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "hr", "span"];
+const ATRIBUTOS = ["href", "style", "class", "data-feito", "data-nova", "data-nota", "colspan", "rowspan", "target", "rel"];
 
 export function limparHtml(html) {
   if (!window.DOMPurify) return html || "";
@@ -18,7 +18,7 @@ export function limparHtml(html) {
 // Ao colar (de Word, PDF, sites): mantém a estrutura, tira cores, fontes e estilos.
 function limparColado(html) {
   if (!window.DOMPurify) return null;
-  return DOMPurify.sanitize(html, { ALLOWED_TAGS: TAGS.filter((t) => t !== "a"), ALLOWED_ATTR: ["colspan", "rowspan"] });
+  return DOMPurify.sanitize(html, { ALLOWED_TAGS: TAGS.filter((t) => t !== "a" && t !== "span"), ALLOWED_ATTR: ["colspan", "rowspan"] });
 }
 
 // Converte os textos antigos (Markdown) para o formato atual.
@@ -83,6 +83,7 @@ function estaVazio(el) {
 
 function atualizarVazio(el) {
   el.classList.toggle("vazio", estaVazio(el));
+  el.classList.toggle("com-notas", !!el.querySelector("span.nota"));
 }
 
 // Transforma um elemento em editor. Devolve funções para mudar o modo.
@@ -241,6 +242,83 @@ function alternarPassos() {
   }
 }
 
+// ── Notas na margem ──
+// As palavras ficam em <span class="nota" data-nota="*">; a nota aparece na
+// margem direita, na altura da linha (no celular, como sobrescrito).
+function alternarNota() {
+  const s = sel();
+  if (!s.rangeCount) return;
+  const r = s.getRangeAt(0);
+  const atual = elementoDe(r.commonAncestorContainer)?.closest("span.nota");
+  if (atual && editorAtivo.contains(atual)) {
+    const texto = prompt("Nota na margem (deixe vazio para apagar a nota):", atual.dataset.nota || "");
+    if (texto === null) return;
+    if (texto.trim()) { atual.dataset.nota = texto.trim(); return; }
+    const pai = atual.parentNode;
+    while (atual.firstChild) pai.insertBefore(atual.firstChild, atual);
+    atual.remove();
+    return;
+  }
+  if (r.collapsed || !r.toString().trim()) {
+    alert("Selecione as palavras que vão receber a nota.");
+    return;
+  }
+  const texto = prompt("Nota na margem para o trecho selecionado (ex.: *, 2x, repetido):", "*");
+  if (!texto?.trim()) return;
+  const span = document.createElement("span");
+  span.className = "nota";
+  span.dataset.nota = texto.trim();
+  span.appendChild(r.extractContents());
+  span.querySelectorAll("p, h2, h3, li").forEach((b) => b.replaceWith(...b.childNodes, " ")); // nota fica dentro de uma linha
+  r.insertNode(span);
+  s.selectAllChildren(span);
+}
+
+// ── Caixa com bordas (comentários) ──
+function blocoDe(no) {
+  if (!no || !editorAtivo?.contains(no) || no === editorAtivo) return null;
+  while (no.parentNode !== editorAtivo) no = no.parentNode;
+  return no;
+}
+
+function alternarCaixa() {
+  const s = sel();
+  if (!s.rangeCount) return;
+  const r = s.getRangeAt(0);
+  const dentro = elementoDe(r.startContainer)?.closest("blockquote.caixa");
+  if (dentro && editorAtivo.contains(dentro)) {
+    dentro.replaceWith(...dentro.childNodes);
+    return;
+  }
+  const inicio = blocoDe(r.startContainer);
+  const fim = blocoDe(r.endContainer) || inicio;
+  if (!inicio) return;
+  const caixa = document.createElement("blockquote");
+  caixa.className = "caixa";
+  inicio.before(caixa);
+  let no = inicio;
+  while (no) {
+    const prox = no === fim ? null : no.nextSibling;
+    if (no.nodeType === 3) {
+      if (no.textContent.trim()) { const p = document.createElement("p"); p.textContent = no.textContent; caixa.appendChild(p); }
+      no.remove();
+    } else caixa.appendChild(no);
+    no = prox;
+  }
+  if (!caixa.firstChild) caixa.innerHTML = "<p><br></p>";
+  // sempre deixa uma linha depois da caixa, para continuar escrevendo fora dela
+  if (!caixa.nextSibling) {
+    const p = document.createElement("p");
+    p.appendChild(document.createElement("br"));
+    caixa.after(p);
+  }
+  const fimR = document.createRange();
+  fimR.selectNodeContents(caixa.lastChild);
+  fimR.collapse(false);
+  s.removeAllRanges();
+  s.addRange(fimR);
+}
+
 // ── Tabelas ──
 const celulaDoCursor = () => {
   const c = elementoDe(sel().anchorNode)?.closest("td, th");
@@ -293,6 +371,25 @@ function consertarListas() {
     s.removeAllRanges();
     s.addRange(r);
   }
+}
+
+function maisLinhaAcima(c) {
+  const tr = c.parentElement;
+  const tabela = tr.closest("table");
+  const cabecalho = tr.parentElement.tagName === "THEAD";
+  const nova = document.createElement("tr");
+  for (let i = 0; i < colunasDe(tabela); i++) nova.appendChild(celulaVazia(cabecalho ? "th" : "td"));
+  tr.before(nova);
+  colocarCursorEm(nova.firstChild);
+}
+
+function maisColunaEsquerda(c) {
+  const k = [...c.parentElement.children].indexOf(c);
+  c.closest("table").querySelectorAll("tr").forEach((tr) => {
+    const ref = tr.children[Math.min(k, tr.children.length - 1)];
+    const nova = celulaVazia(tr.parentElement.tagName === "THEAD" ? "th" : "td");
+    if (ref) ref.before(nova); else tr.appendChild(nova);
+  });
 }
 
 function maisLinha(c) {
@@ -351,12 +448,18 @@ const BOTOES = [
   "|",
   { menu: "Tabela", titulo: "Inserir ou mudar uma tabela", itens: [
     { rotulo: "Nova tabela", acao: novaTabela },
+    { rotulo: "+ Linha acima", naTabela: maisLinhaAcima },
     { rotulo: "+ Linha abaixo", naTabela: maisLinha },
+    { rotulo: "+ Coluna à esquerda", naTabela: maisColunaEsquerda },
     { rotulo: "+ Coluna à direita", naTabela: maisColuna },
     { rotulo: "− Remover linha", naTabela: menosLinha },
     { rotulo: "− Remover coluna", naTabela: menosColuna },
     { rotulo: "Remover tabela", naTabela: (c) => c.closest("table").remove(), perigo: true },
   ] },
+  "|",
+  { id: "nota", rotulo: "✱ Nota", titulo: "Nota na margem para as palavras selecionadas (ex.: *, 2x, “repetido”). Com o cursor numa nota: editar ou apagar", acao: alternarNota },
+  { id: "caixa", rotulo: "▭ Caixa", titulo: "Põe as linhas selecionadas dentro de um bloco com bordas (ótimo para comentários). Clique de novo para tirar", acao: alternarCaixa },
+  "|",
   { menu: "Alinhamento", titulo: "Alinhar a linha (ou as linhas selecionadas)", itens: [
     { rotulo: "À esquerda", acao: () => cmd("justifyLeft") },
     { rotulo: "Centralizado", acao: () => cmd("justifyCenter") },
@@ -453,4 +556,6 @@ function atualizarEstadoDaBarra() {
   barraAtual.querySelector('[data-id="subtitulo"]')?.classList.toggle("ativo", !!el?.closest("h3"));
   barraAtual.querySelector('[data-id="pequeno"]')?.classList.toggle("ativo", !!el?.closest("small"));
   barraAtual.querySelector('[data-id="passos"]')?.classList.toggle("ativo", !!el?.closest("ul.tarefas"));
+  barraAtual.querySelector('[data-id="nota"]')?.classList.toggle("ativo", !!el?.closest("span.nota"));
+  barraAtual.querySelector('[data-id="caixa"]')?.classList.toggle("ativo", !!el?.closest("blockquote.caixa"));
 }

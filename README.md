@@ -20,13 +20,17 @@ recuperação), os arquivos são ilegíveis.
     (quando foi feito de fato, ex.: escrito à mão e passado para o caderno dias
     depois) além de criado e editado. As três datas vão no modo Ler e nas
     exportações (PDF, Word, .txt).
-  - **Texto contínuo**: uma descrição opcional + **entradas com data e hora**, numeradas,
-    numa linha do tempo (a mais recente no topo). Feito para a revisão de
-    literatura em que você avança um pouco por dia.
+  - **Texto contínuo**: um “Sobre” opcional + **entradas com data e hora**,
+    numeradas. Cada entrada é uma página (setinhas ‹ › ou a lista para pular);
+    nas exportações, tudo continua em texto corrido. Na lista do caderno
+    aparecem o “Sobre” e as datas da primeira e da última entrada. Feito para
+    a revisão de literatura em que você avança um pouco por dia.
+  - Na lista do caderno, cada texto tem **Ler** e **Escrever** (clicar no
+    cartão abre em Ler).
 - **Editor visual** (Escrever / Ler) com barra de formatação: negrito, itálico,
   sublinhado, subtítulo, texto pequeno, sub/sobrescrito, listas, lista de
   **passos** com caixinha (marcável também no modo Ler, útil na bancada),
-  tabelas, alinhamento e limpar formatação. Textos em Times New Roman; a
+  tabelas (com linha acima/abaixo e coluna à esquerda/direita), **notas na margem** (✱ Nota: um “*” ou “2x” ao lado das palavras selecionadas), **caixa com bordas** para comentários (▭ Caixa), alinhamento e limpar formatação. Textos em Times New Roman; a
   interface em Lexend. Tema claro ou escuro (⚙ → Aparência). Ao colar de Word/PDF/sites, a formatação estranha é limpa.
 - **Painéis laterais recolhíveis**: cadernos e lista de textos (esta começa recolhida).
 - **Lembretes** na página inicial, ao lado dos cadernos. O **+** oferece

@@ -325,6 +325,21 @@ legend { font-weight: 600; font-size: .9rem; padding: 0 .3rem; }
 .item-icone { font-size: 1.4rem; line-height: 1.2; }
 .item-corpo { display: flex; flex-direction: column; gap: .15rem; min-width: 0; flex: 1; }
 .item-grande .item-titulo { font-family: var(--doc); font-size: 1.2rem; font-weight: 700; }
+/* Cartão com "Ler" / "Escrever" e, no texto contínuo, o período das entradas */
+.item-cartao { position: relative; }
+.item-cartao .item-grande { padding-right: 12.5rem; min-height: 5.2rem; }
+.item-lado {
+  position: absolute; top: .85rem; right: 1rem;
+  display: flex; flex-direction: column; align-items: flex-end; gap: .45rem;
+}
+.item-periodo { font-size: .76rem; color: var(--suave); white-space: nowrap; }
+.item-modos { display: flex; gap: .3rem; }
+.item-modos .botao { padding: .2rem .65rem; font-size: .8rem; }
+.item-resumo strong { font-weight: 600; }
+@media (max-width: 640px) {
+  .item-cartao .item-grande { padding-right: 1.1rem; padding-bottom: 3rem; }
+  .item-lado { top: auto; bottom: .7rem; right: 1rem; left: 3.4rem; flex-direction: row; justify-content: space-between; align-items: center; }
+}
 
 /* Lixeira */
 .lista-lixeira { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
@@ -425,6 +440,27 @@ legend { font-weight: 600; font-size: .9rem; padding: 0 .3rem; }
 .rt small { font-size: .8em; color: var(--doc-suave); }
 .rt a { color: var(--acento); }
 .rt blockquote { margin: 1em 0; padding: .1em 1em; border-left: 3px solid var(--borda); color: var(--doc-suave); }
+/* Caixa com bordas (comentários) */
+.rt blockquote.caixa {
+  margin: .9em 0; padding: .6em .9em; color: var(--doc-texto);
+  border: 1.5px solid var(--tabela-borda); border-radius: 6px; background: var(--tabela-cab);
+}
+.rt blockquote.caixa > :last-child { margin-bottom: 0; }
+/* Notas na margem: as palavras ganham um sublinhado pontilhado e a nota
+   aparece à direita, na altura da linha. */
+.rt.com-notas { margin-right: 7.5rem; }
+.rt span.nota { text-decoration: underline dotted var(--acento); text-underline-offset: .2em; background: color-mix(in srgb, var(--acento) 9%, transparent); border-radius: 2px; }
+.rt span.nota::after {
+  content: attr(data-nota);
+  position: absolute; left: calc(100% + .9rem); width: 6.6rem;
+  padding-left: .45rem; border-left: 2px solid var(--acento);
+  font: 600 .8rem/1.35 var(--ui); color: var(--acento); white-space: normal; text-decoration: none;
+  overflow-wrap: anywhere; pointer-events: none;
+}
+@media (max-width: 760px) {
+  .rt.com-notas { margin-right: 0; }
+  .rt span.nota::after { position: static; width: auto; border: 0; padding: 0 0 0 .15em; vertical-align: super; font-size: .68em; }
+}
 .rt hr { border: 0; border-top: 1px solid var(--borda); margin: 1.5em 0; }
 .rt ul, .rt ol { margin: 0 0 .8em; padding-left: 1.6em; }
 .rt li { margin: .15em 0; }
@@ -473,6 +509,21 @@ details.descricao .suave { font-size: .8rem; }
 #app .entrada-cabeca input { width: auto; margin: 0; padding: .15rem .35rem; font-size: .85rem; background: var(--campo); }
 .selo { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--acento); background: var(--acento-claro); padding: .1rem .45rem; border-radius: 99px; }
 .entrada-texto { padding: 0 .2rem; }
+/* Texto contínuo: uma entrada por página */
+.paginas-entradas {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  margin: 0 0 1rem; font-family: var(--ui); font-size: .85rem; color: var(--suave);
+}
+.paginas-entradas.embaixo { justify-content: space-between; margin: 2rem 0 0; padding-top: 1rem; border-top: 1px solid var(--borda); }
+.paginas-entradas .pag {
+  border: 1px solid var(--borda); background: var(--painel); color: var(--texto);
+  border-radius: 8px; min-width: 2.2rem; height: 2.1rem; padding: 0 .6rem; cursor: pointer; font-size: 1rem;
+}
+.paginas-entradas.embaixo .pag { font-size: .85rem; }
+.paginas-entradas .pag:hover:not(:disabled) { border-color: var(--acento); }
+.paginas-entradas .pag:disabled { opacity: .35; cursor: default; }
+#app .paginas-entradas select { width: auto; max-width: 100%; margin: 0; padding: .3rem .5rem; font-size: .85rem; }
+.pagina-entrada .entrada::before { display: none; }
 .pagina-texto[data-modo="escrever"] .entrada-texto { border-left: 2px solid transparent; }
 
 /* Aviso flutuante */

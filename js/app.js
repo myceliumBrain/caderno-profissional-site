@@ -326,9 +326,19 @@ function resultadosDaBusca() {
   }).sort(porEdicao);
 }
 
+// Resumo na lista: o "Sobre" no texto contínuo (nada, se estiver vazio); o
+// começo do texto no pontual.
 function resumo(t) {
-  const fonte = t.tipo === "diario" ? (entradasAtivas(t)[0]?.corpo || t.corpo) : t.corpo;
-  return textoDeHtml(fonte).slice(0, 140);
+  return textoDeHtml(t.corpo).slice(0, 140);
+}
+
+// Texto contínuo: datas da primeira e da última entrada.
+function periodoDoDiario(t) {
+  const en = entradasAtivas(t);
+  if (!en.length) return "";
+  const primeira = en[en.length - 1].data;
+  const ultima = en[0].data;
+  return primeira === ultima ? dataCurta(primeira) : `${dataCurta(primeira)} → ${dataCurta(ultima)}`;
 }
 
 function metaDoTexto(t, comPasta = false) {
@@ -524,17 +534,28 @@ function renderizarPrincipal() {
   }
 }
 
+// Cartão de um texto: clicar abre em Ler; os botões ao lado escolhem o modo.
 function itemGrande(t, comPasta = false) {
   const r = resumo(t);
+  const periodo = t.tipo === "diario" ? periodoDoDiario(t) : "";
   return `
-    <li><button class="item-grande" data-texto="${esc(t.id)}">
-      <span class="item-icone">${icone(t)}</span>
-      <span class="item-corpo">
-        <span class="item-titulo">${esc(t.titulo || "Sem título")}</span>
-        <span class="item-meta">${esc(metaDoTexto(t, comPasta))}</span>
-        ${r ? `<span class="item-resumo">${esc(r)}</span>` : ""}
-      </span>
-    </button></li>`;
+    <li class="item-cartao">
+      <button class="item-grande" data-texto="${esc(t.id)}" data-abrir="ler" title="Abrir para ler">
+        <span class="item-icone">${icone(t)}</span>
+        <span class="item-corpo">
+          <span class="item-titulo">${esc(t.titulo || "Sem título")}</span>
+          <span class="item-meta">${esc(metaDoTexto(t, comPasta))}</span>
+          ${r ? `<span class="item-resumo">${t.tipo === "diario" ? `<strong>Sobre:</strong> ` : ""}${esc(r)}</span>` : ""}
+        </span>
+      </button>
+      <div class="item-lado">
+        ${periodo ? `<span class="item-periodo" title="Primeira e última entrada">${esc(periodo)}</span>` : ""}
+        <span class="item-modos">
+          <button type="button" class="botao pequeno" data-texto="${esc(t.id)}" data-abrir="ler">Ler</button>
+          <button type="button" class="botao pequeno" data-texto="${esc(t.id)}" data-abrir="escrever">Escrever</button>
+        </span>
+      </div>
+    </li>`;
 }
 
 function paginaInicio(el) {
@@ -1276,7 +1297,7 @@ function paginaTexto(el) {
           <div class="diario-topo">
             <button class="botao primario" data-acao="nova-entrada">+ Nova entrada</button>
           </div>
-          <div class="linha-do-tempo" id="entradas"></div>` : `
+          <div class="pagina-entrada" id="entradas"></div>` : `
           <div class="rt-leitura">
             <div class="sobre" id="corpo-texto"></div>
             <div id="entradas"></div>
@@ -1308,96 +1329,95 @@ function paginaTexto(el) {
     aoMudar: (html) => { t.corpo = html; tocarTexto(t); },
   });
 
-  if (t.tipo === "diario") {
-    if (escrever) renderizarEntradas(t);
-    else renderizarLeitura(t);
-  }
+  if (t.tipo === "diario") renderizarPaginaEntrada(t, escrever);
 }
 
-// Diário no modo Ler: igual ao PDF (ordem cronológica, título por entrada).
-function renderizarLeitura(t) {
-  if (!t.corpo) $("#corpo-texto").hidden = true;
-  const caixa = $("#entradas");
-  const entradas = entradasAtivas(t).reverse();
-  if (!entradas.length) {
-    caixa.innerHTML = `<p class="vazio">Nenhuma entrada ainda.</p>`;
-    return;
-  }
-  caixa.innerHTML = "";
-  entradas.forEach((en, i) => {
-    const h = document.createElement("h2");
-    h.className = "titulo-entrada";
-    h.textContent = `Entrada nº ${i + 1} — ${dataLonga(en.data)}, ${en.hora}`;
-    const corpo = document.createElement("div");
-    caixa.append(h, corpo);
-    montarEditor(corpo, {
-      html: en.corpo,
-      editavel: false,
-      placeholder: "",
-      aoMudar: (html) => { en.corpo = html; en.atualizadoEm = agora(); tocarTexto(t); },
-    });
-  });
-}
+// Texto contínuo: cada entrada é uma "página" (em Escrever e em Ler), com
+// setinhas para ir à anterior/próxima. As exportações continuam com o texto
+// corrido (todas as entradas em sequência).
+const paginaDoDiario = {}; // id do texto → id da entrada aberta (padrão: a mais recente)
 
-function renderizarEntradas(t) {
-  const escrever = true;
+function renderizarPaginaEntrada(t, escrever) {
   const caixa = $("#entradas");
-  const entradas = entradasAtivas(t);
+  const entradas = entradasAtivas(t).reverse(); // ordem cronológica: nº 1 é a mais antiga
+  if (!escrever && !t.corpo) $("#corpo-texto").hidden = true;
   if (!entradas.length) {
-    caixa.innerHTML = `<p class="vazio">Nenhuma entrada ainda. Clique em “+ Nova entrada” para registrar a primeira.</p>`;
+    caixa.innerHTML = `<p class="vazio">Nenhuma entrada ainda.${escrever ? " Clique em “+ Nova entrada” para registrar a primeira." : ""}</p>`;
     return;
   }
-  caixa.innerHTML = "";
+  let i = entradas.findIndex((e) => e.id === paginaDoDiario[t.id]);
+  if (i < 0) i = entradas.length - 1;
+  const en = entradas[i];
+  paginaDoDiario[t.id] = en.id;
   const total = entradas.length;
-  entradas.forEach((en, i) => {
-    const art = document.createElement("article");
-    art.className = "entrada";
-    art.dataset.entrada = en.id;
-    art.innerHTML = `
+  const ir = (j) => {
+    paginaDoDiario[t.id] = entradas[j].id;
+    renderizarPaginaEntrada(t, escrever);
+    caixa.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+  const navegacao = (embaixo) => `
+    <nav class="paginas-entradas${embaixo ? " embaixo" : ""}" aria-label="Entradas">
+      <button type="button" class="pag" data-pag="${i - 1}" ${i === 0 ? "disabled" : ""} title="Entrada anterior" aria-label="Entrada anterior">‹${embaixo ? " Anterior" : ""}</button>
+      ${embaixo ? `<span class="pag-onde">Entrada ${i + 1} de ${total}</span>` : `
+      <select class="ir-entrada" aria-label="Ir para a entrada">
+        ${entradas.map((e, j) => `<option value="${j}" ${j === i ? "selected" : ""}>Entrada nº ${j + 1} — ${esc(dataCurta(e.data))}, ${esc(e.hora)}</option>`).join("")}
+      </select>
+      <span class="pag-onde">de ${total}</span>`}
+      <button type="button" class="pag" data-pag="${i + 1}" ${i === total - 1 ? "disabled" : ""} title="Próxima entrada" aria-label="Próxima entrada">${embaixo ? "Próxima " : ""}›</button>
+    </nav>`;
+
+  caixa.innerHTML = navegacao(false) + (escrever ? `
+    <article class="entrada" data-entrada="${esc(en.id)}">
       <div class="entrada-cabeca">
-        <span class="entrada-num">nº ${total - i}</span>
-        ${escrever
-          ? `<input type="date" class="entrada-data" value="${esc(en.data)}" title="Data">
-             <input type="time" class="entrada-hora" value="${esc(en.hora)}" title="Hora">`
-          : `<span class="entrada-quando"><strong>${esc(dataLonga(en.data))}</strong> · ${esc(en.hora)}</span>`}
-        ${i === 0 ? `<span class="selo">mais recente</span>` : ""}
+        <span class="entrada-num">nº ${i + 1}</span>
+        <input type="date" class="entrada-data" value="${esc(en.data)}" title="Data">
+        <input type="time" class="entrada-hora" value="${esc(en.hora)}" title="Hora">
+        ${i === total - 1 ? `<span class="selo">mais recente</span>` : ""}
         <span class="espaco"></span>
         ${menuAcoes("entrada-editar", "entrada-lixeira", `data-entrada-id="${esc(en.id)}"`)}
       </div>
-      <div class="entrada-texto"></div>`;
-    caixa.appendChild(art);
-    montarEditor(art.querySelector(".entrada-texto"), {
-      html: en.corpo,
-      editavel: escrever,
-      placeholder: "O que você leu ou fez? Referências, achados, próximos passos…",
-      aoMudar: (html) => { en.corpo = html; en.atualizadoEm = agora(); tocarTexto(t); },
+      <div class="entrada-texto"></div>
+    </article>` : `
+    <h2 class="titulo-entrada">Entrada nº ${i + 1} — ${esc(dataLonga(en.data))}, ${esc(en.hora)}</h2>
+    <div class="entrada-texto"></div>`) + (total > 1 ? navegacao(true) : "");
+
+  caixa.querySelectorAll("[data-pag]").forEach((b) => b.addEventListener("click", () => ir(Number(b.dataset.pag))));
+  caixa.querySelector(".ir-entrada").addEventListener("change", (e) => ir(Number(e.target.value)));
+
+  montarEditor(caixa.querySelector(".entrada-texto"), {
+    html: en.corpo,
+    editavel: escrever,
+    placeholder: escrever ? "O que você leu ou fez? Referências, achados, próximos passos…" : "",
+    aoMudar: (html) => { en.corpo = html; en.atualizadoEm = agora(); tocarTexto(t); },
+  });
+  if (!escrever) return;
+
+  const art = caixa.querySelector(".entrada");
+  const reordenar = () => { tocarTexto(t); renderizarPaginaEntrada(t, true); };
+  art.querySelector(".entrada-data").addEventListener("change", (e) => { if (e.target.value) { en.data = e.target.value; en.atualizadoEm = agora(); reordenar(); } });
+  art.querySelector(".entrada-hora").addEventListener("change", (e) => { if (e.target.value) { en.hora = e.target.value; en.atualizadoEm = agora(); reordenar(); } });
+  art.querySelector("[data-acao='entrada-editar']").addEventListener("click", () => {
+    const corpo = art.querySelector(".entrada-texto");
+    corpo.focus();
+    const r = document.createRange();
+    r.selectNodeContents(corpo);
+    r.collapse(false);
+    getSelection().removeAllRanges();
+    getSelection().addRange(r);
+  });
+  art.querySelector("[data-acao='entrada-lixeira']").addEventListener("click", () => {
+    en.naLixeira = agora();
+    en.atualizadoEm = agora();
+    paginaDoDiario[t.id] = (entradas[i + 1] || entradas[i - 1])?.id; // fica na vizinha
+    tocarTexto(t);
+    renderizarPaginaEntrada(t, true);
+    avisar(`Entrada de ${dataCurta(en.data)}, ${en.hora} enviada para a lixeira.`, () => {
+      en.naLixeira = null;
+      en.atualizadoEm = agora();
+      paginaDoDiario[t.id] = en.id;
+      tocarTexto(t);
+      if (estado.textoAtual === t.id) renderizarPrincipal();
     });
-    if (escrever) {
-      const reordenar = () => { tocarTexto(t); renderizarEntradas(t); };
-      art.querySelector(".entrada-data").addEventListener("change", (e) => { if (e.target.value) { en.data = e.target.value; en.atualizadoEm = agora(); reordenar(); } });
-      art.querySelector(".entrada-hora").addEventListener("change", (e) => { if (e.target.value) { en.hora = e.target.value; en.atualizadoEm = agora(); reordenar(); } });
-      art.querySelector("[data-acao='entrada-editar']").addEventListener("click", () => {
-        const corpo = art.querySelector(".entrada-texto");
-        corpo.focus();
-        const r = document.createRange();
-        r.selectNodeContents(corpo);
-        r.collapse(false);
-        getSelection().removeAllRanges();
-        getSelection().addRange(r);
-      });
-      art.querySelector("[data-acao='entrada-lixeira']").addEventListener("click", () => {
-        en.naLixeira = agora();
-        en.atualizadoEm = agora();
-        tocarTexto(t);
-        renderizarEntradas(t);
-        avisar(`Entrada de ${dataCurta(en.data)}, ${en.hora} enviada para a lixeira.`, () => {
-          en.naLixeira = null;
-          en.atualizadoEm = agora();
-          tocarTexto(t);
-          if (estado.textoAtual === t.id) renderizarPrincipal();
-        });
-      });
-    }
   });
 }
 
@@ -1422,6 +1442,7 @@ function novaEntrada(t) {
   const en = { id: novoId("entrada"), data: dataISO(d), hora: horaISO(d), corpo: "", criadoEm: agora(), atualizadoEm: agora() };
   t.entradas ||= [];
   t.entradas.push(en);
+  paginaDoDiario[t.id] = en.id;
   tocarTexto(t);
   renderizarPrincipal();
   const art = document.querySelector(`[data-entrada="${en.id}"]`);
@@ -1676,6 +1697,10 @@ function configurarApp() {
       }
     }
     if (d.pasta) return abrirPasta(d.pasta);
+    if (d.texto && d.abrir) {
+      estado.modo = d.abrir;
+      gravarLS("caderno.modo", d.abrir);
+    }
     if (d.texto) return abrirTexto(d.texto);
   });
 
