@@ -766,6 +766,26 @@ dialog form label { width: 100%; }
 button.anexo { cursor: pointer; }
 button.anexo:hover { border-color: var(--acento); }
 .lembrete-anexos { display: flex; flex-wrap: wrap; gap: .3rem; margin: .25rem 0 .1rem; }
+/* Fontes (links) */
+.campo-fontes { display: flex; flex-direction: column; gap: .35rem; }
+.rotulo-campo { font-size: .76rem; color: var(--suave); }
+.nova-fonte { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .3rem; }
+.nova-fonte input[name=fonteUrl] { grid-column: 1 / -1; }
+#app .nova-fonte input { padding: .35rem .5rem; font-size: .82rem; }
+.nova-fonte .botao { white-space: nowrap; font-size: .8rem; }
+.fonte-item {
+  display: flex; align-items: center; gap: .3rem; min-width: 0;
+  padding: .1rem .5rem; border: 1px solid var(--borda); border-radius: 6px; background: var(--painel); font-size: .78rem;
+}
+.fonte-nome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fonte-item button { border: 0; background: none; color: var(--suave); cursor: pointer; padding: 0 .1rem; }
+.fonte-item button:hover { color: var(--perigo); }
+.lembrete-fontes { display: flex; flex-direction: column; align-items: flex-start; gap: .15rem; margin: .25rem 0 .1rem; }
+.fonte {
+  max-width: 100%; font-size: .8rem; color: var(--acento); text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fonte:hover { text-decoration: underline; }
 
 /* Pastas */
 .pastas-lembretes { list-style: none; margin: 0 0 .7rem; padding: 0; display: flex; flex-direction: column; gap: .35rem; }

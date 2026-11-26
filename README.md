@@ -37,7 +37,8 @@ recuperação), os arquivos são ilegíveis.
   *Criar pasta* ou *Criar lembrete*: pastas (ex.: “Laboratório”, “Casa”) abrem
   dentro do próprio quadro e guardam seus lembretes. Cada lembrete tem
   **título, descrição, cor** (🔴 Prioritário, 🔵 Intelectual, 🟢 Rotina,
-  🟡 Social), **previsão de conclusão**, **data limite** e **anexos** (fotos,
+  🟡 Social), **previsão de conclusão**, **data limite**, **fontes** (links de
+  sites/artigos, com nome opcional, separados da descrição) e **anexos** (fotos,
   PDFs, qualquer arquivo até 25 MB, cifrados em `data/anexos/`). O ✎ edita
   tudo isso. Marcar como feito leva para “Concluídos”; só ali dá para excluir
   de vez, e aí os anexos também são apagados do repositório (o mesmo vale ao

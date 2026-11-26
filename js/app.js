@@ -729,6 +729,42 @@ async function abrirAnexo(a) {
 
 // ── Desenho ──
 
+// ── Fontes (links) ──
+// Só endereços http(s); sem "https://", ele é acrescentado.
+function normalizarUrl(bruto) {
+  let t = (bruto || "").trim();
+  if (!t) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) t = `https://${t}`;
+  try {
+    const u = new URL(t);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+  } catch { return null; }
+}
+
+function nomeDaFonte(f) {
+  if (f.titulo) return f.titulo;
+  try {
+    const u = new URL(f.url);
+    const caminho = u.pathname === "/" ? "" : u.pathname;
+    return (u.hostname.replace(/^www\./, "") + caminho).slice(0, 60);
+  } catch { return f.url; }
+}
+
+// Passa o link digitado para a lista de fontes do formulário. false = link inválido.
+function adicionarFonte() {
+  const c = lem.campos;
+  const url = normalizarUrl(c.fonteUrl);
+  if (!url) {
+    if ((c.fonteUrl || "").trim()) lem.erro = "Esse link não parece válido (use um endereço de site, ex.: www.exemplo.com).";
+    return false;
+  }
+  (c.fontes ||= []).push({ url, titulo: (c.fonteTitulo || "").trim() || null });
+  c.fonteUrl = "";
+  c.fonteTitulo = "";
+  lem.erro = "";
+  return true;
+}
+
 function escolherCor(atual) {
   const opcoes = [{ id: "", rotulo: "Sem cor" }, ...CORES_LEMBRETE];
   return `
@@ -762,6 +798,15 @@ function formLembrete() {
           ${pastas.map((p) => `<option value="${esc(p.id)}" ${p.id === c.pasta ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}
         </select>
       </label>` : ""}
+      <div class="campo-fontes">
+        <span class="rotulo-campo">Fontes</span>
+        ${(c.fontes || []).map((f, i) => `<span class="fonte-item">🔗 <span class="fonte-nome" title="${esc(f.url)}">${esc(nomeDaFonte(f))}</span><button type="button" data-tirar-fonte="${i}" title="Remover fonte" aria-label="Remover fonte">✕</button></span>`).join("")}
+        <div class="nova-fonte">
+          <input name="fonteUrl" type="url" inputmode="url" placeholder="Link de uma fonte (site, artigo…)" aria-label="Link da fonte" value="${esc(c.fonteUrl || "")}">
+          <input name="fonteTitulo" maxlength="120" placeholder="Nome (opcional)" aria-label="Nome da fonte" value="${esc(c.fonteTitulo || "")}">
+          <button class="botao pequeno" type="button" data-lem="add-fonte">🔗 Adicionar</button>
+        </div>
+      </div>
       <div class="campo-anexos">
         ${anexos.map((a) => `<span class="anexo">📎 ${esc(a.nome)} <small>${tamanhoTexto(a.tamanho)}</small><button type="button" data-tirar-anexo="${esc(a.id)}" title="Remover anexo" aria-label="Remover ${esc(a.nome)}">✕</button></span>`).join("")}
         ${lem.arquivos.map((f, i) => `<span class="anexo novo">📎 ${esc(f.name)} <small>${tamanhoTexto(f.size)}</small><button type="button" data-tirar-arquivo="${i}" title="Remover anexo" aria-label="Remover ${esc(f.name)}">✕</button></span>`).join("")}
@@ -821,6 +866,7 @@ function itemLembrete(l, feito) {
   const ativa = feito ? null : dataAtiva(l);
   const aberto = lem.abertos.has(l.id);
   const nAnexos = l.anexos?.length || 0;
+  const nFontes = l.fontes?.length || 0;
   const rotulo = l.descricao ? "descrição" : "detalhes";
   return `
     <li class="${feito ? "feito" : ""}${cor}${lem.destaque === l.id ? " destaque" : ""}" data-lembrete="${esc(l.id)}">
@@ -835,11 +881,12 @@ function itemLembrete(l, feito) {
       </div>
       <div class="lembrete-baixo">
         <button type="button" class="abrir-detalhes" data-detalhes="${esc(l.id)}" aria-expanded="${aberto}">
-          <span class="seta-detalhes">${aberto ? "▾" : "▸"}</span> ${rotulo}${nAnexos ? ` · 📎 ${nAnexos}` : ""}
+          <span class="seta-detalhes">${aberto ? "▾" : "▸"}</span> ${rotulo}${nFontes ? ` · 🔗 ${nFontes}` : ""}${nAnexos ? ` · 📎 ${nAnexos}` : ""}
         </button>
         ${aberto ? `
         <div class="lembrete-detalhes">
           ${l.descricao ? `<span class="lembrete-desc">${esc(l.descricao)}</span>` : ""}
+          ${nFontes ? `<span class="lembrete-fontes">${l.fontes.map((f) => `<a class="fonte" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer" title="${esc(f.url)}">🔗 ${esc(nomeDaFonte(f))}</a>`).join("")}</span>` : ""}
           ${nAnexos ? `<span class="lembrete-anexos">${l.anexos.map((a) => `<button type="button" class="anexo" data-anexo="${esc(a.id)}" data-de="${esc(l.id)}" title="Abrir ${esc(a.nome)}">📎 ${esc(a.nome)}</button>`).join("")}</span>` : ""}
           <span class="lembrete-meta">${l.cor ? `<span class="etiqueta-cor cor-${l.cor}">${esc(rotuloCor(l.cor))}</span> ` : ""}${datasDoLembrete(l)} ${feito ? `concluído ${esc(quando(l.concluidoEm))}` : `criado ${esc(quando(l.criadoEm))}`}</span>
         </div>` : ""}
@@ -907,8 +954,8 @@ function abrirFormLembrete(l = null) {
     form: l ? null : "lembrete", editando: l?.id || null, editandoPasta: null,
     arquivos: [], remover: new Set(), erro: "", focar: true,
     campos: l
-      ? { texto: l.texto, descricao: l.descricao || "", cor: l.cor || "", previsao: l.previsao || "", limite: l.limite || "", pasta: pastaDoLembrete(l) || "" }
-      : { cor: pasta?.cor || "", pasta: lem.pasta || "" },
+      ? { texto: l.texto, descricao: l.descricao || "", cor: l.cor || "", previsao: l.previsao || "", limite: l.limite || "", pasta: pastaDoLembrete(l) || "", fontes: [...(l.fontes || [])] }
+      : { cor: pasta?.cor || "", pasta: lem.pasta || "", fontes: [] },
   });
 }
 
@@ -1018,6 +1065,7 @@ function montarLembretes(caixa) {
 
     const texto = (c.texto || "").trim();
     if (!texto) { lem.erro = "Dê um título ao lembrete."; lem.focar = true; return redesenhar(); }
+    if ((c.fonteUrl || "").trim() && !adicionarFonte()) return redesenhar();
     if (c.previsao && c.limite && c.limite < c.previsao) { lem.erro = "A data limite não pode ser antes da previsão de conclusão."; return redesenhar(); }
     const grande = lem.arquivos.find((f) => f.size > ANEXO_MAX_MB * 1024 * 1024);
     if (grande) { lem.erro = `“${grande.name}” passa de ${ANEXO_MAX_MB} MB.`; return redesenhar(); }
@@ -1046,6 +1094,7 @@ function montarLembretes(caixa) {
       previsao: c.previsao || null,
       limite: c.limite || null,
       pasta: c.pasta || null,
+      fontes: c.fontes || [],
     };
     const existente = lem.editando && d.lembretes.find((x) => x.id === lem.editando);
     if (existente) {
@@ -1063,6 +1112,18 @@ function montarLembretes(caixa) {
     montarLembretes($("#lembretes"));
   });
   caixa.querySelector("details.concluidos")?.addEventListener("toggle", (e) => gravarLS("caderno.concluidos", e.target.open ? "1" : "0"));
+
+  caixa.querySelectorAll(".nova-fonte input").forEach((inp) => inp.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    adicionarFonte();
+    lem.focarFonte = true;
+    redesenhar();
+  }));
+  if (lem.focarFonte) {
+    lem.focarFonte = false;
+    caixa.querySelector(".nova-fonte input[name=fonteUrl]")?.focus();
+  }
 
   // Guarda o que foi digitado: o quadro pode ser redesenhado com o formulário aberto.
   caixa.oninput = (e) => {
@@ -1113,6 +1174,7 @@ function montarLembretes(caixa) {
     }
     if (ds.tirarAnexo) { lem.remover.add(ds.tirarAnexo); return redesenhar(); }
     if (ds.tirarArquivo) { lem.arquivos.splice(Number(ds.tirarArquivo), 1); return redesenhar(); }
+    if (ds.tirarFonte) { lem.campos.fontes.splice(Number(ds.tirarFonte), 1); return redesenhar(); }
     if (ds.mes !== undefined) {
       const n = Number(ds.mes);
       if (n === 0) { lem.mes = null; lem.dia = dataISO(); }
@@ -1143,6 +1205,10 @@ function montarLembretes(caixa) {
       case "nova-pasta": fecharForms(); Object.assign(lem, { form: "pasta", focar: true, campos: {} }); break;
       case "novo-lembrete": fecharForms(); abrirFormLembrete(); break;
       case "cancelar": fecharForms(); break;
+      case "add-fonte":
+        adicionarFonte();
+        lem.focarFonte = true;
+        break;
       case "editar-pasta":
         fecharForms();
         Object.assign(lem, { editandoPasta: pasta.id, focar: true, campos: { nome: pasta.nome, cor: pasta.cor || "" } });
