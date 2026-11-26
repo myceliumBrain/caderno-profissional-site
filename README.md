@@ -26,13 +26,21 @@ recuperação), os arquivos são ilegíveis.
   tabelas, alinhamento e limpar formatação. Textos em Times New Roman; a
   interface em Lexend. Tema claro ou escuro (⚙ → Aparência). Ao colar de Word/PDF/sites, a formatação estranha é limpa.
 - **Painéis laterais recolhíveis**: cadernos e lista de textos (esta começa recolhida).
-- **Lembretes** na página inicial, ao lado dos cadernos: coisas pontuais para
-  hoje ou amanhã. O **+** oferece *Criar pasta* ou *Criar lembrete*: pastas
-  (ex.: “Laboratório”, “Casa”) abrem dentro do próprio quadro e guardam seus
-  lembretes. Lembretes e pastas podem ter cor: 🔴 Prioritário, 🔵 Intelectual,
-  🟢 Rotina, 🟡 Social (lembrete novo numa pasta herda a cor dela). Marcar como
-  feito leva para “Concluídos”; só ali dá para excluir de vez. A setinha ▾ da
-  pasta permite editar nome/cor ou excluí-la (com os lembretes dentro).
+- **Lembretes** na página inicial, ao lado dos cadernos. O **+** oferece
+  *Criar pasta* ou *Criar lembrete*: pastas (ex.: “Laboratório”, “Casa”) abrem
+  dentro do próprio quadro e guardam seus lembretes. Cada lembrete tem
+  **título, descrição, cor** (🔴 Prioritário, 🔵 Intelectual, 🟢 Rotina,
+  🟡 Social), **previsão de conclusão**, **data limite** e **anexos** (fotos,
+  PDFs, qualquer arquivo até 25 MB, cifrados em `data/anexos/`). O ✎ edita
+  tudo isso. Marcar como feito leva para “Concluídos”; só ali dá para excluir
+  de vez, e aí os anexos também são apagados do repositório (o mesmo vale ao
+  excluir uma pasta).
+  - No topo do site aparece **“X lembretes”** (os pendentes).
+  - No rodapé aparecem os pendentes perto do prazo: **!** a 4 dias da previsão
+    e **!!** a 7 dias da data limite (ou atrasados). Clicar leva ao lembrete.
+  - Abaixo dos lembretes há um **calendário** do mês, como uma agenda: cada
+    lembrete aparece no dia da previsão (fundo claro) e no da data limite (cor
+    cheia). Clicar num dia lista o que está marcado nele.
 - **Lixeira**: cadernos, textos e entradas vão para a Lixeira (depois de “Novo
   caderno”). Lá, a setinha ▾ de cada item permite **Restaurar** ou **Apagar
   definitivamente** (sempre com um aviso de confirmação; apagar um caderno

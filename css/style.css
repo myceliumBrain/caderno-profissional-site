@@ -185,7 +185,7 @@ legend { font-weight: 600; font-size: .9rem; padding: 0 .3rem; }
   border: 0; background: none; cursor: pointer; padding: .4rem .5rem; border-radius: 8px;
 }
 .marca:hover { background: var(--painel-2); }
-.status { font-size: .82rem; color: var(--suave); min-width: 0; max-width: 50vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status { font-size: .82rem; color: var(--suave); min-width: 0; max-width: min(50vw, calc(50% - 7rem)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status.ok::before { content: "● "; color: var(--acento); }
 .status.pendente { color: var(--aviso); }
 .status.erro { color: var(--perigo); }
@@ -600,12 +600,13 @@ dialog form label { width: 100%; }
 .pagina-inicio {
   max-width: 1400px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 330px;
+  grid-template-columns: minmax(0, 1fr) 360px;
   gap: 2rem;
   align-items: start;
 }
 .lembretes {
   position: sticky; top: 1.5rem;
+  max-height: calc(100vh - 7.5rem); overflow-y: auto; overscroll-behavior: contain;
   background: var(--painel);
   border: 1px solid var(--borda);
   border-radius: 16px;
@@ -613,13 +614,14 @@ dialog form label { width: 100%; }
   padding: 1.1rem 1.1rem 1.2rem;
 }
 .lembretes-topo { display: flex; align-items: center; gap: .5rem; margin-bottom: .8rem; }
-.lembretes-topo h2 { margin: 0; font-size: 1.15rem; color: var(--texto); }
+.lembretes-topo h2 { margin: 0; font-size: 1.15rem; color: var(--texto); display: flex; align-items: center; gap: .45rem; min-width: 0; overflow-wrap: anywhere; }
 .selo-contagem {
   min-width: 1.4rem; height: 1.4rem; padding: 0 .4rem; border-radius: 99px;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--acento); color: var(--acento-texto); font-size: .75rem; font-weight: 600;
 }
-/* Cores dos lembretes e pastas: Prioritário, Intelectual, Rotina, Social */
+
+/* Cores: Prioritário, Intelectual, Rotina, Social */
 :root {
   --lem-vermelho: #c8402f; --lem-vermelho-fundo: #fbe9e6;
   --lem-azul: #2f63b3;     --lem-azul-fundo: #e6eefb;
@@ -636,10 +638,9 @@ dialog form label { width: 100%; }
 .cor-azul     { --cor: var(--lem-azul);     --cor-fundo: var(--lem-azul-fundo); }
 .cor-verde    { --cor: var(--lem-verde);    --cor-fundo: var(--lem-verde-fundo); }
 .cor-amarelo  { --cor: var(--lem-amarelo);  --cor-fundo: var(--lem-amarelo-fundo); }
-.cor-nenhuma  { --cor: var(--borda);        --cor-fundo: var(--painel-2); }
+.cor-nenhuma  { --cor: var(--suave);        --cor-fundo: var(--painel-2); }
 
 .bolinha { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; background: var(--cor); flex: none; }
-.lembretes-topo h2 { display: flex; align-items: center; gap: .45rem; min-width: 0; overflow-wrap: anywhere; }
 .etiqueta-cor {
   display: inline-block; padding: 0 .4rem; border-radius: 99px; font-size: .68rem; font-weight: 600;
   color: var(--cor); background: var(--cor-fundo); line-height: 1.45;
@@ -651,42 +652,84 @@ dialog form label { width: 100%; }
 }
 .voltar-lembretes:hover { color: var(--texto); border-color: var(--acento); }
 
+/* Formulário (criar / editar) */
 .form-lembrete {
   display: flex; flex-direction: column; gap: .55rem; margin-bottom: .9rem;
   padding: .7rem; border: 1px solid var(--borda); border-radius: 10px; background: var(--painel-2);
 }
-#app .form-lembrete input:not([type=radio]) { margin: 0; padding: .45rem .6rem; font-size: .9rem; }
+#app .form-lembrete input:not([type=radio]):not([type=file]),
+#app .form-lembrete textarea,
+#app .form-lembrete select { margin: 0; padding: .45rem .6rem; font-size: .9rem; }
+#app .form-lembrete textarea { resize: vertical; min-height: 3.2rem; font-family: var(--ui); }
+.form-lembrete label { font-size: .76rem; color: var(--suave); display: flex; flex-direction: column; gap: .2rem; }
+.campos-datas { display: grid; grid-template-columns: minmax(0, 1fr); gap: .45rem; }
+.campos-datas label { flex-direction: row; align-items: center; justify-content: space-between; gap: .5rem; }
+#app .campos-datas input { width: 10.5rem; flex: none; padding: .3rem .4rem; font-size: .82rem; }
 .form-botoes { display: flex; justify-content: flex-end; gap: .4rem; }
+.erro-lembrete { margin: 0; color: var(--perigo); font-size: .82rem; }
 .escolher-cor { display: flex; flex-wrap: wrap; gap: .3rem; }
-.opcao-cor {
-  display: inline-flex; align-items: center; gap: .3rem; cursor: pointer;
+.form-lembrete .opcao-cor {
+  flex-direction: row; display: inline-flex; align-items: center; gap: .3rem; cursor: pointer;
   padding: .2rem .5rem; border: 1px solid var(--borda); border-radius: 99px;
-  font-size: .76rem; font-weight: 400; background: var(--painel);
+  font-size: .76rem; color: var(--texto); background: var(--painel);
 }
 .opcao-cor input { position: absolute; opacity: 0; pointer-events: none; }
 .opcao-cor:has(input:checked) { border-color: var(--texto); font-weight: 600; }
 .opcao-cor:has(input:focus-visible) { outline: 2px solid var(--acento); outline-offset: 1px; }
+.campo-anexos { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.form-lembrete .anexar { flex-direction: row; color: var(--texto); font-size: .8rem; }
 
+/* Anexos */
+.anexo {
+  display: inline-flex; align-items: center; gap: .3rem; max-width: 100%;
+  padding: .1rem .5rem; border: 1px solid var(--borda); border-radius: 6px;
+  background: var(--painel); font-size: .76rem; color: var(--texto);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.anexo small { color: var(--suave); }
+.anexo.novo { border-style: dashed; }
+.anexo button { border: 0; background: none; color: var(--suave); cursor: pointer; padding: 0 .1rem; }
+.anexo button:hover { color: var(--perigo); }
+button.anexo { cursor: pointer; }
+button.anexo:hover { border-color: var(--acento); }
+.lembrete-anexos { display: flex; flex-wrap: wrap; gap: .3rem; margin: .25rem 0 .1rem; }
+
+/* Pastas */
 .pastas-lembretes { list-style: none; margin: 0 0 .7rem; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
 .pasta-lembrete {
   width: 100%; display: flex; align-items: center; gap: .5rem; text-align: left; cursor: pointer;
   padding: .5rem .6rem; font-size: .9rem; color: var(--texto);
   background: var(--painel); border: 1px solid var(--borda); border-left: 4px solid var(--cor); border-radius: 8px;
 }
+.pasta-lembrete.cor-nenhuma { border-left-color: var(--borda); }
 .pasta-lembrete:hover { background: var(--cor-fundo); }
 .pasta-lembrete-nome { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .pasta-lembrete-n { font-size: .75rem; color: var(--suave); min-width: 1ch; }
-.lista-lembretes li[class*="cor-"] { box-shadow: inset 3px 0 0 var(--cor); padding-left: .55rem; }
-.lista-lembretes li[class*="cor-"] .lembrete input[type=checkbox] { accent-color: var(--cor); }
+
+/* Lista */
 .lista-lembretes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.lista-lembretes li { display: flex; align-items: flex-start; gap: .4rem; padding: .5rem .25rem; border-top: 1px solid var(--borda); }
+.lista-lembretes li { display: flex; align-items: flex-start; gap: .55rem; padding: .55rem .25rem; border-top: 1px solid var(--borda); transition: background .4s; }
 .lista-lembretes li:first-child { border-top: 0; }
-.lembrete { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: .6rem; font-weight: 400; font-size: .92rem; cursor: pointer; }
-.lembrete input[type=checkbox] { width: 1.05rem; height: 1.05rem; margin: .15rem 0 0; flex: none; accent-color: var(--acento); cursor: pointer; }
-.lembrete-corpo { display: flex; flex-direction: column; min-width: 0; }
-.lembrete-texto { overflow-wrap: anywhere; line-height: 1.4; }
-.lembrete-meta { font-size: .74rem; color: var(--suave); }
-.lista-lembretes li.feito .lembrete-texto { text-decoration: line-through; color: var(--suave); }
+.lista-lembretes li.editando { display: block; padding: .4rem 0; }
+.lista-lembretes li.editando .form-lembrete { margin: 0; }
+.lista-lembretes li[class*="cor-"] { box-shadow: inset 3px 0 0 var(--cor); padding-left: .55rem; }
+.lista-lembretes li.destaque { background: var(--acento-claro); }
+.lista-lembretes li > input[type=checkbox] { width: 1.05rem; height: 1.05rem; margin: .2rem 0 0; flex: none; accent-color: var(--cor, var(--acento)); cursor: pointer; }
+.lembrete-corpo { flex: 1; display: flex; flex-direction: column; min-width: 0; font-size: .92rem; }
+.lembrete-texto { overflow-wrap: anywhere; line-height: 1.4; font-weight: 500; }
+.lembrete-desc { font-size: .82rem; color: var(--suave); white-space: pre-line; overflow-wrap: anywhere; line-height: 1.45; margin-top: .1rem; }
+.lembrete-meta { font-size: .74rem; color: var(--suave); display: flex; flex-wrap: wrap; align-items: center; gap: .15rem .4rem; margin-top: .15rem; }
+.data-lembrete { white-space: nowrap; }
+.data-lembrete.perto { color: var(--aviso); font-weight: 600; }
+.data-lembrete.urgente { color: var(--perigo); font-weight: 600; }
+.lista-lembretes li.feito .lembrete-texto { text-decoration: line-through; color: var(--suave); font-weight: 400; }
+.lembrete-acoes { display: flex; flex-direction: column; align-items: flex-end; gap: .3rem; flex: none; }
+.editar-lembrete {
+  border: 0; background: none; color: var(--suave); cursor: pointer;
+  width: 1.6rem; height: 1.6rem; border-radius: 6px; font-size: .9rem; opacity: .55;
+}
+.lista-lembretes li:hover .editar-lembrete, .editar-lembrete:focus-visible { opacity: 1; }
+.editar-lembrete:hover { background: var(--painel-2); color: var(--texto); }
 .lembretes-vazio { color: var(--suave); font-size: .88rem; margin: .2rem 0 .4rem; }
 .concluidos { margin-top: .9rem; padding-top: .7rem; border-top: 1px dashed var(--borda); }
 .concluidos > summary { cursor: pointer; color: var(--suave); font-size: .85rem; margin-bottom: .3rem; }
@@ -697,7 +740,93 @@ dialog form label { width: 100%; }
 }
 .excluir-lembrete:hover { background: var(--perigo-fundo); }
 
+/* "!" (previsão) e "!!" (data limite) */
+.marca-alerta {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.15rem; height: 1.15rem; padding: 0 .25rem; border-radius: 5px;
+  font-size: .72rem; font-weight: 800; line-height: 1; vertical-align: .1em;
+}
+.marca-alerta.nivel-1 { background: var(--lem-amarelo-fundo); color: var(--aviso); border: 1px solid var(--aviso); }
+.marca-alerta.nivel-2 { background: var(--perigo); color: #fff; }
+:root[data-tema="escuro"] .marca-alerta.nivel-2 { color: #1a1a18; }
+
+/* Calendário */
+.calendario { margin-top: 1.1rem; padding-top: .9rem; border-top: 1px solid var(--borda); }
+.cal-topo { display: flex; align-items: center; gap: .3rem; margin-bottom: .5rem; }
+.cal-titulo { flex: 1; text-align: center; font-weight: 600; font-size: .95rem; }
+.cal-nav, .cal-hoje {
+  border: 1px solid var(--borda); background: var(--painel); color: var(--texto);
+  border-radius: 7px; height: 1.8rem; cursor: pointer; font-size: .8rem;
+}
+.cal-nav { width: 1.8rem; font-size: 1rem; }
+.cal-hoje { padding: 0 .55rem; order: 5; }
+.cal-nav:hover, .cal-hoje:hover { border-color: var(--acento); }
+.cal-grade { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.cal-sem { text-align: center; font-size: .68rem; font-weight: 600; color: var(--suave); padding-bottom: .2rem; }
+.dia {
+  min-height: 3.6rem; padding: .15rem .12rem; display: flex; flex-direction: column; gap: 1px; align-items: stretch;
+  border: 1px solid var(--borda); border-radius: 6px; background: var(--painel); cursor: pointer; text-align: left;
+  color: var(--texto); min-width: 0; font: inherit;
+}
+.dia:hover { border-color: var(--acento); }
+.dia.fora { opacity: .45; }
+.dia.sel { outline: 2px solid var(--acento); outline-offset: -1px; }
+.dia .num { font-size: .7rem; line-height: 1.2; padding-left: .15rem; color: var(--suave); }
+.dia.hoje .num {
+  align-self: flex-start; background: var(--acento); color: var(--acento-texto);
+  border-radius: 99px; padding: 0 .3rem; font-weight: 700;
+}
+.ev {
+  display: block; font-size: .58rem; line-height: 1.35; padding: 0 .2rem; border-radius: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ev.prev { background: var(--cor-fundo); color: var(--cor); box-shadow: inset 2px 0 0 var(--cor); }
+.ev.lim { background: var(--cor); color: var(--painel); font-weight: 600; }
+.ev.feito { opacity: .45; text-decoration: line-through; }
+.ev-mais { font-size: .58rem; color: var(--suave); padding-left: .2rem; }
+.cal-legenda { display: flex; gap: .9rem; justify-content: center; margin-top: .45rem; font-size: .72rem; color: var(--suave); }
+.cal-legenda .ev { display: inline-block; font-size: .65rem; padding: 0 .3rem; }
+.cal-dia { margin-top: .7rem; padding: .6rem .7rem; border-radius: 10px; background: var(--painel-2); font-size: .85rem; }
+.cal-dia ul { list-style: none; margin: .4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; }
+.cal-dia .lembretes-vazio { margin: .3rem 0 0; }
+.cal-item {
+  width: 100%; display: flex; align-items: center; gap: .4rem; text-align: left; cursor: pointer;
+  border: 0; background: none; padding: .2rem .1rem; font-size: .82rem; color: var(--texto); border-radius: 5px;
+}
+.cal-item:hover { background: var(--cor-fundo); }
+.cal-item.feito { color: var(--suave); text-decoration: line-through; }
+
+/* "X lembretes" no centro do cabeçalho */
+.topo { position: relative; }
+.topo-lembretes {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  border: 1px solid var(--borda); background: var(--painel-2); color: var(--texto);
+  border-radius: 99px; padding: .25rem .8rem; font-size: .85rem; font-weight: 500; cursor: pointer; white-space: nowrap;
+}
+.topo-lembretes:hover { border-color: var(--acento); }
+.topo-lembretes[hidden] { display: none; }
+
+/* Rodapé com lembretes perto da previsão (!) ou da data limite (!!) */
+.alertas {
+  flex: none; display: flex; gap: .5rem; overflow-x: auto;
+  padding: .45rem 1rem; border-top: 1px solid var(--borda); background: var(--painel);
+}
+.alertas[hidden] { display: none; }
+.alerta {
+  flex: none; display: inline-flex; align-items: center; gap: .45rem; max-width: 22rem;
+  padding: .3rem .7rem .3rem .4rem; border-radius: 8px; cursor: pointer; font-size: .82rem; color: var(--texto);
+  border: 1px solid var(--borda); border-left: 3px solid var(--cor); background: var(--painel);
+}
+.alerta.nivel-2 { background: var(--perigo-fundo); border-color: var(--perigo-borda); border-left-color: var(--cor); }
+.alerta:hover { border-color: var(--acento); }
+.alerta-texto { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.alerta-prazo { color: var(--suave); font-size: .74rem; white-space: nowrap; }
+.alerta.nivel-2 .alerta-prazo { color: var(--perigo); }
+
 @media (max-width: 1000px) {
   .pagina-inicio { grid-template-columns: minmax(0, 1fr); }
-  .lembretes { position: static; order: -1; }
+  .lembretes { position: static; order: -1; max-height: none; }
+}
+@media (max-width: 640px) {
+  .topo-lembretes { position: static; transform: none; padding: .2rem .55rem; font-size: .78rem; }
 }

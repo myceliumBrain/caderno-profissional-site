@@ -1,6 +1,6 @@
 import {
   novaChaveMestra, criarFechadura, abrirFechadura, cifrar, decifrar,
-  novoCodigoRecuperacao, normalizarCodigo,
+  novoCodigoRecuperacao, normalizarCodigo, cifrarBytes, decifrarBytes,
 } from "./cripto.js";
 import { lerPublico, GitHub, ErroConflito, ErroAcesso } from "./armazenamento.js";
 import { mesclarDados } from "./mesclar.js";
@@ -200,6 +200,7 @@ async function salvar() {
       if (estado.pagina !== "texto") renderizarPrincipal();
     }
     estado.erro = "";
+    processarFilaAnexos();
     if (!estado.pendente && !estado.salvarDeNovo) {
       clearTimeout(timerRascunho);
       apagarRascunho();
@@ -237,6 +238,7 @@ function atualizarStatus() {
     el.classList.add("ok");
   }
   botao.disabled = estado.salvando || !estado.pendente;
+  atualizarAvisosLembretes();
 }
 
 async function conectar(chave) {
@@ -279,6 +281,7 @@ async function abrirCaderno() {
   retomarPosicao(recuperou);
   if (recuperou) avisar("Recuperei alterações que ainda não tinham sido enviadas. Enviando agora…");
   if (estado.pendente) salvar();
+  processarFilaAnexos(); // anexos excluídos que ainda não tinham sido apagados do GitHub
 }
 
 // ---------------------------------------------------------------------------
@@ -571,8 +574,10 @@ function paginaInicio(el) {
 // ── Lembretes (página inicial) ──
 // O "+" abre "Criar pasta" / "Criar lembrete". Pastas agrupam lembretes por
 // tema (ex.: laboratório, casa) e se abrem dentro do próprio quadro.
+// Cada lembrete tem título, descrição, cor, previsão e data limite de
+// conclusão e anexos (fotos, PDFs…), cifrados em data/anexos/<id>.bin.
 // Pendentes ficam no topo; concluídos vão para "Concluídos", onde podem
-// voltar ou ser excluídos de vez (os únicos itens que o caderno apaga).
+// voltar ou ser excluídos de vez, junto com os anexos.
 
 const CORES_LEMBRETE = [
   { id: "vermelho", rotulo: "Prioritário" },
@@ -580,75 +585,307 @@ const CORES_LEMBRETE = [
   { id: "verde", rotulo: "Rotina" },
   { id: "amarelo", rotulo: "Social" },
 ];
-const rotuloCor = (c) => CORES_LEMBRETE.find((x) => x.id === c)?.rotulo || "";
-const lem = { pasta: null, form: null, editandoPasta: null }; // estado do quadro
+const AVISO_PREVISAO_DIAS = 4;  // "!"  a 4 dias da previsão de conclusão
+const AVISO_LIMITE_DIAS = 7;    // "!!" a 7 dias da data limite
+const ANEXO_MAX_MB = 25;
+const caminhoAnexo = (id) => `data/anexos/${id}.bin`;
 
-function escolherCor(nome, atual) {
+const rotuloCor = (c) => CORES_LEMBRETE.find((x) => x.id === c)?.rotulo || "";
+// Estado do quadro (não vai para o GitHub).
+const lem = {
+  pasta: null, form: null, editando: null, editandoPasta: null,
+  campos: {}, arquivos: [], remover: new Set(), focar: false, enviando: false, erro: "",
+  mes: null, dia: null, destaque: null,
+};
+
+const diaMes = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+function diasAte(iso) {
+  const [a, m, d] = iso.split("-").map(Number);
+  const h = new Date();
+  return Math.round((new Date(a, m - 1, d) - new Date(h.getFullYear(), h.getMonth(), h.getDate())) / 864e5);
+}
+function prazoTexto(dias) {
+  if (dias < -1) return `atrasado há ${-dias} dias`;
+  if (dias === -1) return "atrasado desde ontem";
+  if (dias === 0) return "hoje";
+  if (dias === 1) return "amanhã";
+  return `em ${dias} dias`;
+}
+function tamanhoTexto(b) {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
+  return `${(b / 1024 / 1024).toFixed(1).replace(".", ",")} MB`;
+}
+
+function idsPastasLembretes() { return new Set(estado.dados.pastasLembretes.map((p) => p.id)); }
+// Lembrete cuja pasta sumiu (ex.: excluída em outro aparelho) aparece na raiz.
+function pastaDoLembrete(l, ids = idsPastasLembretes()) { return l.pasta && ids.has(l.pasta) ? l.pasta : null; }
+const lembretesPendentes = () => estado.dados.lembretes.filter((l) => !l.concluidoEm);
+
+// Nível de alerta de um lembrete pendente: 2 = "!!" (limite), 1 = "!" (previsão), 0 = nada.
+function alertaDe(l) {
+  if (l.concluidoEm) return null;
+  if (l.limite && diasAte(l.limite) <= AVISO_LIMITE_DIAS) return { nivel: 2, data: l.limite, dias: diasAte(l.limite), tipo: "data limite" };
+  if (l.previsao && diasAte(l.previsao) <= AVISO_PREVISAO_DIAS) return { nivel: 1, data: l.previsao, dias: diasAte(l.previsao), tipo: "previsão" };
+  return null;
+}
+
+// ── Anexos: envio, abertura e fila de exclusão ──
+
+const FILA_APAGAR = "caderno.anexosApagar";
+let apagandoAnexos = false;
+
+function apagarAnexos(ids) {
+  if (!ids.length) return;
+  let fila = [];
+  try { fila = JSON.parse(lerLS(FILA_APAGAR, "[]")); } catch {}
+  gravarLS(FILA_APAGAR, JSON.stringify([...new Set([...fila, ...ids])]));
+  processarFilaAnexos();
+}
+
+// Apaga do GitHub os anexos pendentes; o que falhar (sem internet) fica na fila.
+async function processarFilaAnexos() {
+  if (apagandoAnexos || !estado.github) return;
+  apagandoAnexos = true;
+  try {
+    let fila = [];
+    try { fila = JSON.parse(lerLS(FILA_APAGAR, "[]")); } catch {}
+    for (const id of fila) {
+      try {
+        await estado.github.apagar(caminhoAnexo(id), `Caderno: anexo apagado ${agora()}`);
+        const resto = JSON.parse(lerLS(FILA_APAGAR, "[]")).filter((x) => x !== id);
+        gravarLS(FILA_APAGAR, JSON.stringify(resto));
+      } catch { break; }
+    }
+  } finally {
+    apagandoAnexos = false;
+  }
+}
+
+async function enviarAnexo(arquivo) {
+  const id = novoId("anexo");
+  const bytes = new Uint8Array(await arquivo.arrayBuffer());
+  await estado.github.gravarBinario(caminhoAnexo(id), await cifrarBytes(estado.chave, bytes), `Caderno: anexo ${agora()}`);
+  return { id, nome: arquivo.name, tipo: arquivo.type || "application/octet-stream", tamanho: arquivo.size, criadoEm: agora() };
+}
+
+async function abrirAnexo(a) {
+  // A janela é aberta já no clique (senão o navegador bloqueia o pop-up).
+  const visivel = /^(image\/|application\/pdf|text\/|video\/|audio\/)/.test(a.tipo);
+  const janela = visivel ? window.open("", "_blank") : null;
+  if (janela) janela.document.title = a.nome;
+  avisar(`Abrindo “${a.nome}”…`);
+  try {
+    const bytes = await decifrarBytes(estado.chave, await estado.github.lerBinario(caminhoAnexo(a.id)));
+    const blob = new Blob([bytes], { type: a.tipo });
+    if (janela) {
+      janela.location = URL.createObjectURL(blob);
+      $("#aviso").hidden = true;
+    } else {
+      baixarArquivo(a.nome, blob);
+    }
+  } catch (e) {
+    janela?.close();
+    avisar(e instanceof TypeError ? "Sem conexão: não deu para abrir o anexo." : e.message);
+  }
+}
+
+// ── Desenho ──
+
+function escolherCor(atual) {
   const opcoes = [{ id: "", rotulo: "Sem cor" }, ...CORES_LEMBRETE];
   return `
     <div class="escolher-cor" role="radiogroup" aria-label="Cor">
       ${opcoes.map((c) => `
         <label class="opcao-cor" title="${esc(c.rotulo)}">
-          <input type="radio" name="${nome}" value="${c.id}" ${c.id === (atual || "") ? "checked" : ""}>
+          <input type="radio" name="cor" value="${c.id}" ${c.id === (atual || "") ? "checked" : ""}>
           <span class="bolinha cor-${c.id || "nenhuma"}"></span><span>${esc(c.rotulo)}</span>
         </label>`).join("")}
     </div>`;
 }
 
-function itemLembrete(l, feito) {
-  const cor = l.cor ? ` cor-${l.cor}` : "";
+function formLembrete() {
+  const c = lem.campos;
+  const l = lem.editando && estado.dados.lembretes.find((x) => x.id === lem.editando);
+  const anexos = (l?.anexos || []).filter((a) => !lem.remover.has(a.id));
+  const pastas = [...estado.dados.pastasLembretes].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
   return `
-    <li class="${feito ? "feito" : ""}${cor}" data-lembrete="${esc(l.id)}">
-      <label class="lembrete">
-        <input type="checkbox" ${feito ? `checked data-reabrir="${esc(l.id)}" title="Voltar para pendentes"` : `data-concluir="${esc(l.id)}" title="Marcar como concluído"`}>
-        <span class="lembrete-corpo">
-          <span class="lembrete-texto">${esc(l.texto)}</span>
-          <span class="lembrete-meta">${l.cor ? `<span class="etiqueta-cor cor-${l.cor}">${esc(rotuloCor(l.cor))}</span> ` : ""}${feito ? `concluído ${esc(quando(l.concluidoEm))}` : esc(quando(l.criadoEm))}</span>
-        </span>
-      </label>
-      ${feito ? `<button class="excluir-lembrete" type="button" data-excluir="${esc(l.id)}" title="Excluir de vez">Excluir</button>` : ""}
+    <form class="form-lembrete" data-form="lembrete" autocomplete="off">
+      <input name="texto" maxlength="300" placeholder="Título do lembrete" aria-label="Título" value="${esc(c.texto || "")}">
+      <textarea name="descricao" rows="2" maxlength="4000" placeholder="Descrição (opcional)" aria-label="Descrição">${esc(c.descricao || "")}</textarea>
+      ${escolherCor(c.cor)}
+      <div class="campos-datas">
+        <label>Previsão de conclusão<input type="date" name="previsao" value="${esc(c.previsao || "")}"></label>
+        <label>Data limite para conclusão<input type="date" name="limite" value="${esc(c.limite || "")}"></label>
+      </div>
+      ${pastas.length ? `
+      <label class="campo-pasta">Pasta
+        <select name="pasta">
+          <option value="">Sem pasta</option>
+          ${pastas.map((p) => `<option value="${esc(p.id)}" ${p.id === c.pasta ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}
+        </select>
+      </label>` : ""}
+      <div class="campo-anexos">
+        ${anexos.map((a) => `<span class="anexo">📎 ${esc(a.nome)} <small>${tamanhoTexto(a.tamanho)}</small><button type="button" data-tirar-anexo="${esc(a.id)}" title="Remover anexo" aria-label="Remover ${esc(a.nome)}">✕</button></span>`).join("")}
+        ${lem.arquivos.map((f, i) => `<span class="anexo novo">📎 ${esc(f.name)} <small>${tamanhoTexto(f.size)}</small><button type="button" data-tirar-arquivo="${i}" title="Remover anexo" aria-label="Remover ${esc(f.name)}">✕</button></span>`).join("")}
+        <label class="botao pequeno anexar">📎 Anexar arquivos<input type="file" multiple hidden data-arquivos></label>
+      </div>
+      ${lem.erro ? `<p class="erro-lembrete">${esc(lem.erro)}</p>` : ""}
+      <div class="form-botoes">
+        <button class="botao pequeno" type="button" data-lem="cancelar" ${lem.enviando ? "disabled" : ""}>Cancelar</button>
+        <button class="botao primario pequeno" type="submit" ${lem.enviando ? "disabled" : ""}>${lem.enviando ? "Enviando anexos…" : l ? "Salvar" : "Adicionar"}</button>
+      </div>
+    </form>`;
+}
+
+function formPasta() {
+  const c = lem.campos;
+  return `
+    <form class="form-lembrete" data-form="pasta" autocomplete="off">
+      <input name="nome" maxlength="80" placeholder="Nome da pasta (ex.: Laboratório)" aria-label="Nome da pasta" value="${esc(c.nome || "")}">
+      ${escolherCor(c.cor)}
+      <div class="form-botoes">
+        <button class="botao pequeno" type="button" data-lem="cancelar">Cancelar</button>
+        <button class="botao primario pequeno" type="submit">${lem.editandoPasta ? "Salvar" : "Criar pasta"}</button>
+      </div>
+    </form>`;
+}
+
+function datasDoLembrete(l) {
+  const partes = [];
+  const al = alertaDe(l);
+  if (l.previsao) {
+    const quente = al?.nivel === 1 ? " perto" : "";
+    partes.push(`<span class="data-lembrete${quente}" title="Previsão de conclusão">previsão ${diaMes(l.previsao)}</span>`);
+  }
+  if (l.limite) {
+    const quente = al?.nivel === 2 ? " urgente" : "";
+    partes.push(`<span class="data-lembrete${quente}" title="Data limite para conclusão">limite ${diaMes(l.limite)}</span>`);
+  }
+  return partes.join(" ");
+}
+
+function itemLembrete(l, feito) {
+  if (lem.editando === l.id) return `<li class="editando">${formLembrete()}</li>`;
+  const cor = l.cor ? ` cor-${l.cor}` : "";
+  const al = feito ? null : alertaDe(l);
+  return `
+    <li class="${feito ? "feito" : ""}${cor}${lem.destaque === l.id ? " destaque" : ""}" data-lembrete="${esc(l.id)}">
+      <input type="checkbox" ${feito ? `checked data-reabrir="${esc(l.id)}" title="Voltar para pendentes"` : `data-concluir="${esc(l.id)}" title="Marcar como concluído"`} aria-label="${esc(l.texto)}">
+      <div class="lembrete-corpo">
+        <span class="lembrete-texto">${al ? `<span class="marca-alerta nivel-${al.nivel}" title="${esc(`${al.tipo}: ${prazoTexto(al.dias)}`)}">${al.nivel === 2 ? "!!" : "!"}</span> ` : ""}${esc(l.texto)}</span>
+        ${l.descricao ? `<span class="lembrete-desc">${esc(l.descricao)}</span>` : ""}
+        ${l.anexos?.length ? `<span class="lembrete-anexos">${l.anexos.map((a) => `<button type="button" class="anexo" data-anexo="${esc(a.id)}" data-de="${esc(l.id)}" title="Abrir ${esc(a.nome)}">📎 ${esc(a.nome)}</button>`).join("")}</span>` : ""}
+        <span class="lembrete-meta">${l.cor ? `<span class="etiqueta-cor cor-${l.cor}">${esc(rotuloCor(l.cor))}</span> ` : ""}${datasDoLembrete(l)} ${feito ? `concluído ${esc(quando(l.concluidoEm))}` : esc(quando(l.criadoEm))}</span>
+      </div>
+      <div class="lembrete-acoes">
+        <button class="editar-lembrete" type="button" data-editar="${esc(l.id)}" title="Editar" aria-label="Editar">✎</button>
+        ${feito ? `<button class="excluir-lembrete" type="button" data-excluir="${esc(l.id)}" title="Excluir de vez (com os anexos)">Excluir</button>` : ""}
+      </div>
     </li>`;
 }
 
+// Calendário do mês, como numa agenda: cada lembrete aparece no dia da
+// previsão (fundo claro) e no dia da data limite (cor cheia).
+function calendarioHtml() {
+  const hoje = dataISO();
+  const mes = lem.mes || hoje.slice(0, 7);
+  const [a, m] = mes.split("-").map(Number);
+  const primeiro = new Date(a, m - 1, 1);
+  const inicio = new Date(a, m - 1, 1 - primeiro.getDay());
+  const semanas = Math.ceil((primeiro.getDay() + new Date(a, m, 0).getDate()) / 7);
+  const eventos = {};
+  for (const l of estado.dados.lembretes) {
+    if (l.previsao) (eventos[l.previsao] ||= []).push({ l, tipo: "prev" });
+    if (l.limite) (eventos[l.limite] ||= []).push({ l, tipo: "lim" });
+  }
+  for (const lista of Object.values(eventos)) lista.sort((x, y) => (x.l.concluidoEm ? 1 : 0) - (y.l.concluidoEm ? 1 : 0) || (x.tipo === "lim" ? -1 : 1));
+  const ev = (e) => `<span class="ev ${e.tipo} cor-${e.l.cor || "nenhuma"}${e.l.concluidoEm ? " feito" : ""}" title="${esc(`${e.tipo === "lim" ? "Data limite" : "Previsão"}: ${e.l.texto}`)}">${esc(e.l.texto)}</span>`;
+  let dias = "";
+  for (let i = 0; i < semanas * 7; i++) {
+    const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i);
+    const iso = dataISO(d);
+    const lista = eventos[iso] || [];
+    const classes = ["dia", d.getMonth() !== m - 1 && "fora", iso === hoje && "hoje", iso === lem.dia && "sel"].filter(Boolean).join(" ");
+    dias += `<button type="button" class="${classes}" data-dia="${iso}" aria-label="${esc(dataLonga(iso))}${lista.length ? `, ${plural(lista.length, "lembrete", "lembretes")}` : ""}">
+      <span class="num">${d.getDate()}</span>
+      ${lista.slice(0, 2).map(ev).join("")}
+      ${lista.length > 2 ? `<span class="ev-mais">+${lista.length - 2}</span>` : ""}
+    </button>`;
+  }
+  const titulo = primeiro.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  const doDia = lem.dia ? eventos[lem.dia] || [] : [];
+  return `
+    <section class="calendario" aria-label="Calendário dos lembretes">
+      <div class="cal-topo">
+        <button type="button" class="cal-nav" data-mes="-1" title="Mês anterior" aria-label="Mês anterior">‹</button>
+        <strong class="cal-titulo">${esc(titulo.charAt(0).toUpperCase() + titulo.slice(1))}</strong>
+        <button type="button" class="cal-nav" data-mes="1" title="Próximo mês" aria-label="Próximo mês">›</button>
+        <button type="button" class="cal-hoje" data-mes="0">Hoje</button>
+      </div>
+      <div class="cal-grade">
+        ${["D", "S", "T", "Q", "Q", "S", "S"].map((x) => `<span class="cal-sem">${x}</span>`).join("")}
+        ${dias}
+      </div>
+      <div class="cal-legenda"><span><span class="ev prev cor-nenhuma">&nbsp;&nbsp;&nbsp;</span> previsão</span><span><span class="ev lim cor-nenhuma">&nbsp;&nbsp;&nbsp;</span> data limite</span></div>
+      ${lem.dia ? `
+      <div class="cal-dia">
+        <strong>${esc(dataLonga(lem.dia))}</strong>
+        ${doDia.length ? `<ul>${doDia.map((e) => `
+          <li><button type="button" class="cal-item cor-${e.l.cor || "nenhuma"}${e.l.concluidoEm ? " feito" : ""}" data-ir="${esc(e.l.id)}">
+            <span class="bolinha"></span>${e.tipo === "lim" ? "Data limite" : "Previsão"}: ${esc(e.l.texto)}
+          </button></li>`).join("")}</ul>` : `<p class="lembretes-vazio">Nada marcado neste dia.</p>`}
+      </div>` : ""}
+    </section>`;
+}
+
+function abrirFormLembrete(l = null) {
+  const pasta = lem.pasta && estado.dados.pastasLembretes.find((p) => p.id === lem.pasta);
+  Object.assign(lem, {
+    form: l ? null : "lembrete", editando: l?.id || null, editandoPasta: null,
+    arquivos: [], remover: new Set(), erro: "", focar: true,
+    campos: l
+      ? { texto: l.texto, descricao: l.descricao || "", cor: l.cor || "", previsao: l.previsao || "", limite: l.limite || "", pasta: pastaDoLembrete(l) || "" }
+      : { cor: pasta?.cor || "", pasta: lem.pasta || "" },
+  });
+}
+
+function fecharForms() {
+  Object.assign(lem, { form: null, editando: null, editandoPasta: null, campos: {}, arquivos: [], remover: new Set(), erro: "", enviando: false });
+}
+
+// Vai até um lembrete (pelos alertas do rodapé ou pelo calendário).
+function irParaLembrete(id) {
+  const l = estado.dados.lembretes.find((x) => x.id === id);
+  if (!l) return;
+  fecharForms();
+  lem.pasta = pastaDoLembrete(l);
+  lem.destaque = id;
+  if (l.concluidoEm) gravarLS("caderno.concluidos", "1");
+  if (estado.pagina !== "inicio") abrirInicio();
+  else montarLembretes($("#lembretes"));
+  const li = $(`#lembretes [data-lembrete="${CSS.escape(id)}"]`);
+  li?.scrollIntoView({ block: "center", behavior: "smooth" });
+  setTimeout(() => { lem.destaque = null; li?.classList.remove("destaque"); }, 2500);
+}
+
 function montarLembretes(caixa) {
+  if (!caixa) return;
   const d = estado.dados;
+  const ids = idsPastasLembretes();
   const pasta = lem.pasta && d.pastasLembretes.find((p) => p.id === lem.pasta);
   if (!pasta) lem.pasta = null;
-  // Lembrete cuja pasta sumiu (ex.: excluída em outro aparelho) aparece na raiz.
-  const ids = new Set(d.pastasLembretes.map((p) => p.id));
-  const pastaDe = (l) => (l.pasta && ids.has(l.pasta) ? l.pasta : null);
-  const daqui = d.lembretes.filter((l) => pastaDe(l) === lem.pasta);
+  const daqui = d.lembretes.filter((l) => pastaDoLembrete(l, ids) === lem.pasta);
   const pendentes = daqui.filter((l) => !l.concluidoEm)
-    .sort((a, b) => (a.criadoEm || "").localeCompare(b.criadoEm || ""));
+    .sort((a, b) => (alertaDe(b)?.nivel || 0) - (alertaDe(a)?.nivel || 0) || (a.criadoEm || "").localeCompare(b.criadoEm || ""));
   const concluidos = daqui.filter((l) => l.concluidoEm)
     .sort((a, b) => b.concluidoEm.localeCompare(a.concluidoEm));
   const pendentesDa = (id) => d.lembretes.filter((l) => l.pasta === id && !l.concluidoEm).length;
   const pastas = pasta ? [] : [...d.pastasLembretes].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
-  const abertos = lerLS("caderno.concluidos") === "1";
-  const editando = lem.editandoPasta && d.pastasLembretes.find((p) => p.id === lem.editandoPasta);
+  const abertos = lerLS("caderno.concluidos") === "1" || concluidos.some((l) => l.id === lem.editando);
 
-  let form = "";
-  if (lem.form === "lembrete") {
-    form = `
-      <form class="form-lembrete" data-form="lembrete" autocomplete="off">
-        <input name="texto" maxlength="300" placeholder="Novo lembrete…" aria-label="Novo lembrete">
-        ${escolherCor("cor", pasta?.cor || "")}
-        <div class="form-botoes">
-          <button class="botao pequeno" type="button" data-lem="cancelar">Cancelar</button>
-          <button class="botao primario pequeno" type="submit">Adicionar</button>
-        </div>
-      </form>`;
-  } else if (lem.form === "pasta" || editando) {
-    form = `
-      <form class="form-lembrete" data-form="pasta" autocomplete="off">
-        <input name="nome" maxlength="80" placeholder="Nome da pasta (ex.: Laboratório)" aria-label="Nome da pasta" value="${esc(editando?.nome || "")}">
-        ${escolherCor("cor", editando?.cor || "")}
-        <div class="form-botoes">
-          <button class="botao pequeno" type="button" data-lem="cancelar">Cancelar</button>
-          <button class="botao primario pequeno" type="submit">${editando ? "Salvar" : "Criar pasta"}</button>
-        </div>
-      </form>`;
-  }
+  const form = lem.form === "lembrete" ? formLembrete() : (lem.form === "pasta" || lem.editandoPasta) ? formPasta() : "";
+  const rolagem = caixa.scrollTop;
 
   caixa.innerHTML = `
     <div class="lembretes-topo">
@@ -689,37 +926,99 @@ function montarLembretes(caixa) {
     <details class="concluidos" ${abertos ? "open" : ""}>
       <summary>Concluídos (${concluidos.length})</summary>
       <ul class="lista-lembretes">${concluidos.map((l) => itemLembrete(l, true)).join("")}</ul>
-    </details>` : ""}`;
+    </details>` : ""}
+    ${calendarioHtml()}`;
 
+  caixa.scrollTop = rolagem;
   const redesenhar = () => montarLembretes(caixa);
-  caixa.querySelector(".form-lembrete input[type=text], .form-lembrete input:not([type])")?.focus();
+  if (lem.focar) {
+    lem.focar = false;
+    const campo = caixa.querySelector(".form-lembrete input[name=texto], .form-lembrete input[name=nome]");
+    campo?.focus();
+    campo?.scrollIntoView({ block: "nearest" });
+  }
 
-  caixa.querySelector(".form-lembrete")?.addEventListener("submit", (e) => {
+  caixa.querySelector(".form-lembrete")?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const f = e.target;
-    const cor = f.querySelector("input[name=cor]:checked")?.value || null;
+    if (lem.enviando) return;
+    const c = lem.campos;
     const t = agora();
-    if (f.dataset.form === "lembrete") {
-      const texto = f.texto.value.trim();
-      if (!texto) return;
-      d.lembretes.push({ id: novoId("lembrete"), texto, cor, pasta: lem.pasta, criadoEm: t, atualizadoEm: t, concluidoEm: null });
-      marcarAlterado();
-      redesenhar(); // o formulário continua aberto para adicionar outro
-    } else {
-      const nome = f.nome.value.trim();
+    if (e.target.dataset.form === "pasta") {
+      const nome = (c.nome || "").trim();
       if (!nome) return;
-      if (editando) Object.assign(editando, { nome, cor, atualizadoEm: t });
-      else d.pastasLembretes.push({ id: novoId("pastalem"), nome, cor, criadoEm: t, atualizadoEm: t });
-      lem.form = null;
-      lem.editandoPasta = null;
+      const editando = lem.editandoPasta && d.pastasLembretes.find((p) => p.id === lem.editandoPasta);
+      if (editando) Object.assign(editando, { nome, cor: c.cor || null, atualizadoEm: t });
+      else d.pastasLembretes.push({ id: novoId("pastalem"), nome, cor: c.cor || null, criadoEm: t, atualizadoEm: t });
+      fecharForms();
       marcarAlterado();
-      redesenhar();
+      return redesenhar();
     }
+
+    const texto = (c.texto || "").trim();
+    if (!texto) { lem.erro = "Dê um título ao lembrete."; lem.focar = true; return redesenhar(); }
+    if (c.previsao && c.limite && c.limite < c.previsao) { lem.erro = "A data limite não pode ser antes da previsão de conclusão."; return redesenhar(); }
+    const grande = lem.arquivos.find((f) => f.size > ANEXO_MAX_MB * 1024 * 1024);
+    if (grande) { lem.erro = `“${grande.name}” passa de ${ANEXO_MAX_MB} MB.`; return redesenhar(); }
+
+    // Envia os anexos novos antes de gravar o lembrete.
+    let novos = [];
+    if (lem.arquivos.length) {
+      if (!estado.github) { lem.erro = "Sem conexão com o GitHub para enviar os anexos."; return redesenhar(); }
+      lem.enviando = true;
+      lem.erro = "";
+      redesenhar();
+      try {
+        for (const f of lem.arquivos) novos.push(await enviarAnexo(f));
+      } catch (err) {
+        lem.enviando = false;
+        lem.erro = err instanceof TypeError ? "Sem conexão: os anexos não foram enviados. Tente de novo." : err.message;
+        apagarAnexos(novos.map((a) => a.id)); // não deixa anexos pela metade
+        return montarLembretes($("#lembretes"));
+      }
+    }
+
+    const campos = {
+      texto,
+      descricao: (c.descricao || "").trim(),
+      cor: c.cor || null,
+      previsao: c.previsao || null,
+      limite: c.limite || null,
+      pasta: c.pasta || null,
+    };
+    const existente = lem.editando && d.lembretes.find((x) => x.id === lem.editando);
+    if (existente) {
+      const tirados = (existente.anexos || []).filter((a) => lem.remover.has(a.id));
+      Object.assign(existente, campos, {
+        anexos: [...(existente.anexos || []).filter((a) => !lem.remover.has(a.id)), ...novos],
+        atualizadoEm: agora(),
+      });
+      apagarAnexos(tirados.map((a) => a.id));
+    } else {
+      d.lembretes.push({ id: novoId("lembrete"), ...campos, anexos: novos, criadoEm: t, atualizadoEm: agora(), concluidoEm: null });
+    }
+    fecharForms();
+    marcarAlterado();
+    montarLembretes($("#lembretes"));
   });
   caixa.querySelector("details.concluidos")?.addEventListener("toggle", (e) => gravarLS("caderno.concluidos", e.target.open ? "1" : "0"));
 
+  // Guarda o que foi digitado: o quadro pode ser redesenhado com o formulário aberto.
+  caixa.oninput = (e) => {
+    if (e.target.closest(".form-lembrete") && e.target.name) lem.campos[e.target.name] = e.target.value;
+  };
+
   caixa.onchange = (e) => {
-    const ds = e.target.dataset;
+    const alvo = e.target;
+    if (alvo.matches("[data-arquivos]")) {
+      lem.arquivos.push(...alvo.files);
+      lem.erro = "";
+      return redesenhar();
+    }
+    if (alvo.closest(".form-lembrete")) {
+      if (alvo.name) lem.campos[alvo.name] = alvo.value;
+      return;
+    }
+    const ds = alvo.dataset;
     const l = d.lembretes.find((x) => x.id === (ds.concluir || ds.reabrir));
     if (!l) return;
     l.concluidoEm = ds.concluir ? agora() : null;
@@ -729,34 +1028,70 @@ function montarLembretes(caixa) {
   };
 
   caixa.onclick = (e) => {
-    const b = e.target.closest("[data-lem], [data-lem-pasta], [data-excluir]");
-    if (!b) return;
-    if (b.dataset.lemPasta) {
-      Object.assign(lem, { pasta: b.dataset.lemPasta, form: null, editandoPasta: null });
+    const b = e.target.closest("button");
+    if (!b || !caixa.contains(b)) return;
+    const ds = b.dataset;
+    if (ds.lemPasta) {
+      fecharForms();
+      lem.pasta = ds.lemPasta;
       return redesenhar();
     }
-    if (b.dataset.excluir) {
-      const l = d.lembretes.find((x) => x.id === b.dataset.excluir);
-      if (!l || !confirm(`Excluir de vez o lembrete “${l.texto}”?`)) return;
+    if (ds.anexo) {
+      const a = d.lembretes.find((x) => x.id === ds.de)?.anexos?.find((x) => x.id === ds.anexo);
+      if (a) abrirAnexo(a);
+      return;
+    }
+    if (ds.editar) {
+      abrirFormLembrete(d.lembretes.find((x) => x.id === ds.editar));
+      return redesenhar();
+    }
+    if (ds.tirarAnexo) { lem.remover.add(ds.tirarAnexo); return redesenhar(); }
+    if (ds.tirarArquivo) { lem.arquivos.splice(Number(ds.tirarArquivo), 1); return redesenhar(); }
+    if (ds.mes !== undefined) {
+      const n = Number(ds.mes);
+      if (n === 0) { lem.mes = null; lem.dia = dataISO(); }
+      else {
+        const [a, m] = (lem.mes || dataISO().slice(0, 7)).split("-").map(Number);
+        lem.mes = dataISO(new Date(a, m - 1 + n, 1)).slice(0, 7);
+      }
+      return redesenhar();
+    }
+    if (ds.dia) {
+      lem.dia = lem.dia === ds.dia ? null : ds.dia;
+      if (lem.dia && lem.dia.slice(0, 7) !== (lem.mes || dataISO().slice(0, 7))) lem.mes = lem.dia.slice(0, 7);
+      return redesenhar();
+    }
+    if (ds.ir) return irParaLembrete(ds.ir);
+    if (ds.excluir) {
+      const l = d.lembretes.find((x) => x.id === ds.excluir);
+      const n = l?.anexos?.length || 0;
+      if (!l || !confirm(`Excluir de vez o lembrete “${l.texto}”${n ? ` e ${plural(n, "anexo", "anexos")}` : ""}?`)) return;
       d.lembretes = d.lembretes.filter((x) => x.id !== l.id);
       d.removidos[l.id] = agora();
+      apagarAnexos((l.anexos || []).map((a) => a.id));
       marcarAlterado();
       return redesenhar();
     }
-    switch (b.dataset.lem) {
-      case "voltar": Object.assign(lem, { pasta: null, form: null, editandoPasta: null }); break;
-      case "nova-pasta": Object.assign(lem, { form: "pasta", editandoPasta: null }); break;
-      case "novo-lembrete": Object.assign(lem, { form: "lembrete", editandoPasta: null }); break;
-      case "cancelar": Object.assign(lem, { form: null, editandoPasta: null }); break;
-      case "editar-pasta": Object.assign(lem, { form: null, editandoPasta: lem.pasta }); break;
+    switch (ds.lem) {
+      case "voltar": fecharForms(); lem.pasta = null; break;
+      case "nova-pasta": fecharForms(); Object.assign(lem, { form: "pasta", focar: true, campos: {} }); break;
+      case "novo-lembrete": fecharForms(); abrirFormLembrete(); break;
+      case "cancelar": fecharForms(); break;
+      case "editar-pasta":
+        fecharForms();
+        Object.assign(lem, { editandoPasta: pasta.id, focar: true, campos: { nome: pasta.nome, cor: pasta.cor || "" } });
+        break;
       case "excluir-pasta": {
-        const n = d.lembretes.filter((l) => l.pasta === pasta.id).length;
-        if (!confirm(`Excluir de vez a pasta “${pasta.nome}”${n ? ` e ${plural(n, "lembrete", "lembretes")} dentro dela` : ""}?`)) return;
+        const dentro = d.lembretes.filter((l) => l.pasta === pasta.id);
+        const anexos = dentro.flatMap((l) => (l.anexos || []).map((a) => a.id));
+        if (!confirm(`Excluir de vez a pasta “${pasta.nome}”${dentro.length ? ` e ${plural(dentro.length, "lembrete", "lembretes")} dentro dela` : ""}${anexos.length ? ` (com ${plural(anexos.length, "anexo", "anexos")})` : ""}?`)) return;
         const t = agora();
-        for (const l of d.lembretes) if (l.pasta === pasta.id) d.removidos[l.id] = t;
+        for (const l of dentro) d.removidos[l.id] = t;
         d.lembretes = d.lembretes.filter((l) => l.pasta !== pasta.id);
         d.pastasLembretes = d.pastasLembretes.filter((p) => p.id !== pasta.id);
         d.removidos[pasta.id] = t;
+        apagarAnexos(anexos);
+        fecharForms();
         lem.pasta = null;
         marcarAlterado();
         break;
@@ -765,6 +1100,30 @@ function montarLembretes(caixa) {
     }
     redesenhar();
   };
+}
+
+// ── Cabeçalho ("X lembretes") e rodapé de alertas (! e !!) ──
+
+function atualizarAvisosLembretes() {
+  if (!estado.dados) return;
+  const n = lembretesPendentes().length;
+  const topo = $("#topo-lembretes");
+  if (topo) {
+    topo.hidden = !n;
+    topo.textContent = plural(n, "lembrete", "lembretes");
+    topo.title = `${plural(n, "lembrete pendente", "lembretes pendentes")}`;
+  }
+  const rodape = $("#alertas");
+  if (!rodape) return;
+  const alertas = lembretesPendentes().map((l) => ({ l, a: alertaDe(l) })).filter((x) => x.a)
+    .sort((x, y) => y.a.nivel - x.a.nivel || x.a.dias - y.a.dias);
+  rodape.hidden = !alertas.length;
+  rodape.innerHTML = alertas.map(({ l, a }) => `
+    <button type="button" class="alerta nivel-${a.nivel} cor-${l.cor || "nenhuma"}" data-alerta="${esc(l.id)}" title="${esc(`${a.tipo === "data limite" ? "Data limite para conclusão" : "Previsão de conclusão"}: ${dataCurta(a.data)}`)}">
+      <span class="marca-alerta nivel-${a.nivel}">${a.nivel === 2 ? "!!" : "!"}</span>
+      <span class="alerta-texto">${esc(l.texto)}</span>
+      <span class="alerta-prazo">${esc(a.tipo)} ${esc(prazoTexto(a.dias))}</span>
+    </button>`).join("");
 }
 
 function paginaPasta(el) {
@@ -1211,6 +1570,16 @@ function configurarApp() {
   $("#busca").addEventListener("input", (e) => {
     clearTimeout(timerBusca);
     timerBusca = setTimeout(() => buscar(e.target.value), 250);
+  });
+
+  // "X lembretes" no topo e alertas (! / !!) no rodapé levam aos lembretes.
+  $("#topo-lembretes").addEventListener("click", () => {
+    if (estado.pagina !== "inicio") abrirInicio();
+    $("#lembretes")?.scrollIntoView({ block: "start", behavior: "smooth" });
+  });
+  $("#alertas").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-alerta]");
+    if (b) irParaLembrete(b.dataset.alerta);
   });
 
   // Cliques na área principal (o conteúdo é redesenhado a cada página).

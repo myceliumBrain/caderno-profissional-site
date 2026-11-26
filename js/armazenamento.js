@@ -98,4 +98,44 @@ export class GitHub {
     }
     return (await r.json()).content.sha;
   }
+  // ── Arquivos binários (anexos dos lembretes) ──
+
+  async gravarBinario(caminho, bytes, mensagem) {
+    const corpo = JSON.stringify({ message: mensagem, content: paraB64(bytes), branch: CONFIG.branch });
+    for (let tentativa = 0; ; tentativa++) {
+      const r = await this.api(urlConteudo(caminho), { method: "PUT", body: corpo });
+      if (r.ok) return;
+      // 409: o ramo andou ao mesmo tempo (ex.: o caderno acabou de salvar).
+      if (r.status === 409 && tentativa < 3) { await new Promise((ok) => setTimeout(ok, 800)); continue; }
+      let detalhe = "";
+      try { detalhe = (await r.json()).message || ""; } catch {}
+      throw new Error(`Erro do GitHub ao enviar o anexo (HTTP ${r.status}) ${detalhe}`.trim());
+    }
+  }
+
+  async lerBinario(caminho) {
+    const r = await this.api(`${urlConteudo(caminho)}?ref=${encodeURIComponent(CONFIG.branch)}`, {
+      headers: { Accept: "application/vnd.github.raw" },
+    });
+    if (r.status === 404) throw new Error("O anexo não foi encontrado no GitHub (talvez ainda esteja sendo enviado).");
+    if (!r.ok) throw new Error(`Erro do GitHub ao abrir o anexo (HTTP ${r.status}).`);
+    return new Uint8Array(await r.arrayBuffer());
+  }
+
+  // Apaga um arquivo. Devolve sem erro se ele já não existir.
+  async apagar(caminho, mensagem) {
+    for (let tentativa = 0; ; tentativa++) {
+      const r = await this.api(`${urlConteudo(caminho)}?ref=${encodeURIComponent(CONFIG.branch)}`);
+      if (r.status === 404) return;
+      if (!r.ok) throw new Error(`Erro do GitHub ao apagar ${caminho} (HTTP ${r.status}).`);
+      const { sha } = await r.json();
+      const d = await this.api(urlConteudo(caminho), {
+        method: "DELETE",
+        body: JSON.stringify({ message: mensagem, sha, branch: CONFIG.branch }),
+      });
+      if (d.ok || d.status === 404) return;
+      if (d.status === 409 && tentativa < 3) { await new Promise((ok) => setTimeout(ok, 800)); continue; }
+      throw new Error(`Erro do GitHub ao apagar ${caminho} (HTTP ${d.status}).`);
+    }
+  }
 }

@@ -87,3 +87,19 @@ export function novoCodigoRecuperacao() {
 export function normalizarCodigo(codigo) {
   return codigo.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
+
+// Arquivos (anexos): devolve iv (12 bytes) + conteúdo cifrado, tudo junto.
+export async function cifrarBytes(chaveMestra, bytes) {
+  const iv = aleatorio(12);
+  const chave = await importarChaveMestra(chaveMestra);
+  const dados = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, chave, bytes));
+  const saida = new Uint8Array(12 + dados.length);
+  saida.set(iv);
+  saida.set(dados, 12);
+  return saida;
+}
+
+export async function decifrarBytes(chaveMestra, bytes) {
+  const chave = await importarChaveMestra(chaveMestra);
+  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.subarray(0, 12) }, chave, bytes.subarray(12)));
+}
